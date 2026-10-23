@@ -1,0 +1,42 @@
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+ENV/
+
+# Testing and coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Output artifacts and data
+data/processed/
+data/chunks/
+data/stats/
+artifacts/
+*.log
+
+# Keep sample / seed data tracked if needed, but ignore raw large datasets if specified
+# semantic_search_practice_dataset.csv is an existing practice dataset

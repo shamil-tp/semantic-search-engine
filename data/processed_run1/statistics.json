@@ -1,0 +1,34 @@
+{
+  "file_summary": {
+    "files_discovered": 4,
+    "files_skipped_unsupported": 0,
+    "files_failed": 0,
+    "files_empty": 1,
+    "files_duplicate": 1,
+    "unique_processed_documents": 2,
+    "generated_chunks": 5,
+    "failure_reasons": {}
+  },
+  "document_statistics": {
+    "min_chars": 632,
+    "max_chars": 646,
+    "mean_chars": 639.0,
+    "median_chars": 639.0,
+    "min_words": 83,
+    "max_words": 96,
+    "mean_words": 89.5,
+    "median_words": 89.5,
+    "missing_metadata_count": 0
+  },
+  "chunk_statistics": {
+    "min_chars": 124,
+    "max_chars": 383,
+    "mean_chars": 303.4,
+    "median_chars": 333.0,
+    "min_words": 16,
+    "max_words": 50,
+    "mean_words": 41.8,
+    "median_words": 50.0,
+    "missing_metadata_count": 0
+  }
+}

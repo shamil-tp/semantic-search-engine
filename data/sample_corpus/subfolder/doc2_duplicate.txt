@@ -1,0 +1,10 @@
+Text preprocessing is an essential first phase in building information retrieval and search systems.
+During preprocessing, raw text documents are loaded safely from storage, normalized across character encodings, and sanitized.
+
+Important steps include:
+- Unicode normalization (e.g., NFC format)
+- Deduplication of identical documents via cryptographic hashes
+- Splitting continuous text streams into overlapping chunks
+- Extracting metadata such as timestamps, file sizes, and character offsets
+
+Proper chunking ensures that embedding models and ranking algorithms operate on coherent passages without truncating critical context.
