@@ -46,6 +46,57 @@ To run data ingestion on a directory of documents:
 python -m src.ingestion.cli --input-dir data/sample_corpus --output-dir data/processed --chunk-size 500 --chunk-overlap 50
 ```
 
+## Phase 2 — Baseline Search (TF-IDF Lexical Retrieval)
+
+Phase 2 builds a reproducible lexical retrieval baseline using `scikit-learn`'s `TfidfVectorizer` with sparse matrix cosine similarity scoring, index persistence, and evaluation against labeled queries.
+
+### Building the Lexical Index
+
+To index Phase 1 chunks into a persistent TF-IDF index:
+
+```bash
+python -m src.retrieval.cli build --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/lexical_index
+```
+
+### Searching the Index
+
+To query the saved index without re-indexing:
+
+```bash
+python -m src.retrieval.cli search --index-dir artifacts/indices/lexical_index --query "vector embeddings in semantic search" --top-k 5
+```
+
+### Running Evaluation Benchmarks
+
+To evaluate the index against ground-truth query relevance judgments and save a versioned baseline report:
+
+```bash
+python -m src.retrieval.cli evaluate --index-dir artifacts/indices/lexical_index --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/baselines/baseline_v1.json --k-values 1,3,5,10
+```
+
+> **Note on Reports**: The evaluator refuses to silently overwrite existing reports unless `--force` is explicitly provided, ensuring baseline reproducibility and immutability.
+
+### Search Result Schema
+
+Each retrieved search item includes:
+- `rank`: Result rank starting at 1.
+- `chunk_id`: Identifier formatted as `{document_id}_c{chunk_index}`.
+- `document_id`: Parent document identifier.
+- `score`: Normalized TF-IDF cosine similarity score between query and chunk vector.
+- `text`: Chunk text or excerpt.
+- `source_path`: Original file path.
+- `chunk_index`: 0-indexed position within the document.
+- `metadata`: Parent document metadata (file size, timestamps, word/char counts).
+
+### Evaluation Metrics
+
+- **Recall@k**: Fraction of known relevant documents/chunks retrieved in the top $k$ items.
+- **Mean Reciprocal Rank (MRR)**: Mean reciprocal rank ($1 / \text{rank}$) of the first retrieved relevant item across queries.
+- **nDCG@k**: Normalized Discounted Cumulative Gain evaluating ranked position quality with logarithmic position discounts.
+
+### Metric Meaning and Limitations
+TF-IDF measures exact lexical token overlap and frequency inverse weights. It does not measure semantic similarity, synonyms, or conceptual closeness (which will be addressed in dense retrieval in Phase 4). Scores are lexical relevance signals rather than probabilities.
+
 #### CLI Options
 
 - `--input-dir`, `-i`: (Required) Path to the raw document directory.

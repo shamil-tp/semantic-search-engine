@@ -1,0 +1,26 @@
+[
+  {
+    "query_id": "q1",
+    "query": "vector embeddings in semantic search",
+    "relevant_ids": ["a3090451a0a256d7"],
+    "description": "Information regarding vector embeddings and dense spaces in semantic search (doc1_semantic_search.md)"
+  },
+  {
+    "query_id": "q2",
+    "query": "text preprocessing unicode normalization deduplication",
+    "relevant_ids": ["80befa4c7370c0c2"],
+    "description": "Details about text preprocessing, NFC normalization, deduplication (doc2_preprocessing.txt)"
+  },
+  {
+    "query_id": "q3",
+    "query": "hybrid retrieval keyword search",
+    "relevant_ids": ["a3090451a0a256d7"],
+    "description": "Combining keyword search with vector search (doc1_semantic_search.md)"
+  },
+  {
+    "query_id": "q4",
+    "query": "splitting text streams into overlapping chunks",
+    "relevant_ids": ["80befa4c7370c0c2"],
+    "description": "Splitting documents into overlapping passages/chunks (doc2_preprocessing.txt)"
+  }
+]
