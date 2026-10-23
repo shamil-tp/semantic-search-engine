@@ -97,6 +97,44 @@ Each retrieved search item includes:
 ### Metric Meaning and Limitations
 TF-IDF measures exact lexical token overlap and frequency inverse weights. It does not measure semantic similarity, synonyms, or conceptual closeness (which will be addressed in dense retrieval in Phase 4). Scores are lexical relevance signals rather than probabilities.
 
+## Phase 3 — Classical Text ML and Query Understanding
+
+Phase 3 introduces classical text machine learning components for query understanding:
+- **Intent Classification**: TF-IDF + Linear SVM (`LinearSVC`) with calibrated confidence scores classifying user queries into `informational`, `technical_spec`, or `troubleshooting`.
+- **Named Entity Recognition (NER) & Metadata Filtering**: Extracts structured entities (file extensions, schema attributes, document IDs, algorithms) to apply deterministic metadata filters.
+- **Spelling Normalization & Controlled Expansion**: Maps typos to canonical domain terms and attaches domain synonyms while preserving the original query and logging all expansion terms.
+
+> **Phase 3 Rule**: In accordance with `CLAUDE.md`, all query understanding stages are **disabled by default** to prevent unintended query drift until an evaluation justifies activation. See [docs/decisions/001_query_understanding_ablation.md](docs/decisions/001_query_understanding_ablation.md).
+
+### Training the Intent Classifier
+
+To train and persist the intent classifier:
+
+```bash
+python -m src.query.cli train-intent --output-dir artifacts/models/intent_model
+```
+
+### Analyzing Queries via CLI
+
+To inspect detected intents, extracted entities, and proposed expansions:
+
+```bash
+python -m src.query.cli analyze --query "what is sematic search in .md files" --intent-model artifacts/models/intent_model
+```
+
+### Searching with Query Understanding Flags
+
+Query understanding features can be selectively enabled during search:
+
+```bash
+python -m src.retrieval.cli search \
+  --index-dir artifacts/indices/lexical_sample \
+  --query "what is sematic search in .md files" \
+  --enable-intent --intent-model artifacts/models/intent_model \
+  --enable-ner --apply-filters \
+  --enable-expansion
+```
+
 #### CLI Options
 
 - `--input-dir`, `-i`: (Required) Path to the raw document directory.

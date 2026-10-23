@@ -18,11 +18,12 @@ class BenchmarkEvaluator:
     """
     Evaluates a search engine instance against a labeled query set.
     Supports chunk-level and document-level matching modes.
+    Works transparently with LexicalSearchEngine and DenseSearchEngine.
     """
 
     def __init__(
         self,
-        engine: LexicalSearchEngine,
+        engine: Any,
         k_values: Sequence[int] = (1, 3, 5, 10),
         target_unit: str = "document_id",  # 'document_id' or 'chunk_id'
     ):
@@ -37,19 +38,14 @@ class BenchmarkEvaluator:
         queries_data: List[Dict[str, Any]],
         dataset_name: str = "synthetic_eval_v1",
         corpus_name: str = "sample_corpus",
+        query_pipeline: Optional[Any] = None,
+        enable_filters: bool = False,
     ) -> Dict[str, Any]:
         """
         Run evaluation across labeled queries.
         
-        Expected queries_data schema:
-        [
-            {
-                "query_id": "q1",
-                "query": "query text",
-                "relevant_ids": ["doc_id1", "doc_id2"],
-                "relevance_scores": {"doc_id1": 1.0, "doc_id2": 0.5} (optional)
-            }
-        ]
+        Optional query_pipeline can be passed to preprocess/expand queries.
+        If enable_filters is True, metadata_filters extracted by pipeline are passed to search.
         """
         valid_queries = []
         skipped_queries = []
@@ -66,11 +62,11 @@ class BenchmarkEvaluator:
 
         for q_entry in queries_data:
             query_id = q_entry.get("query_id")
-            query_text = q_entry.get("query", "").strip()
+            raw_query_text = q_entry.get("query", "").strip()
             relevant_ids = set(q_entry.get("relevant_ids", []))
             relevance_scores = q_entry.get("relevance_scores", {r: 1.0 for r in relevant_ids})
 
-            if not query_id or not query_text:
+            if not query_id or not raw_query_text:
                 skipped_queries.append({"query_id": query_id, "reason": "empty_query_or_id"})
                 continue
 
@@ -80,8 +76,22 @@ class BenchmarkEvaluator:
 
             valid_queries.append(q_entry)
 
+            # Query understanding pipeline transformation
+            search_query_text = raw_query_text
+            metadata_filters = None
+
+            if query_pipeline is not None:
+                processed = query_pipeline.process_query(raw_query_text)
+                search_query_text = processed.effective_query
+                if enable_filters and processed.metadata_filters:
+                    metadata_filters = processed.metadata_filters
+
             # Retrieve top_k results
-            search_results = self.engine.search(query_text, top_k=max_k)
+            search_results = self.engine.search(
+                search_query_text,
+                top_k=max_k,
+                metadata_filters=metadata_filters,
+            )
 
             # Map retrieved results to target unit (document_id or chunk_id)
             if self.target_unit == "document_id":
@@ -109,7 +119,7 @@ class BenchmarkEvaluator:
             per_query_results.append(
                 {
                     "query_id": query_id,
-                    "query": query_text,
+                    "query": raw_query_text,
                     "relevant_count": len(relevant_ids),
                     "retrieved_count": len(retrieved_units),
                     "reciprocal_rank": round(rr, 4),

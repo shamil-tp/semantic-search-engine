@@ -8,6 +8,11 @@ from pathlib import Path
 
 from src.evaluation.evaluator import BenchmarkEvaluator
 from src.ingestion.schemas import DocumentChunk
+from src.query.expansion import QueryExpander
+from src.query.intent import IntentClassifier
+from src.query.ner import EntityRecognizer
+from src.query.pipeline import QueryPipeline
+from src.retrieval.dense import DenseSearchEngine
 from src.retrieval.lexical import LexicalSearchEngine
 
 logging.basicConfig(
@@ -54,14 +59,39 @@ def build_command(args):
 
 
 def search_command(args):
-    """Query an existing lexical index."""
+    """Query an existing lexical index with optional query understanding."""
     logger.info(f"Loading index from {args.index_dir}")
     engine = LexicalSearchEngine.load(args.index_dir)
 
+    # Configure query pipeline if flags specified
+    intent_clf = None
+    if args.enable_intent and args.intent_model:
+        intent_clf = IntentClassifier.load(args.intent_model)
+
+    pipeline = QueryPipeline(
+        intent_classifier=intent_clf,
+        enable_intent=args.enable_intent,
+        enable_ner=args.enable_ner,
+        enable_expansion=args.enable_expansion,
+    )
+
+    processed_q = pipeline.process_query(args.query)
+
+    if args.enable_intent and processed_q.intent:
+        print(f"\n[Intent Detected] {processed_q.intent.intent} (confidence: {processed_q.intent.confidence:.2f})")
+    if args.enable_ner and processed_q.entities:
+        ent_strs = [f"{e.text} ({e.label})" for e in processed_q.entities]
+        print(f"[Entities Recognized] {', '.join(ent_strs)}")
+        if processed_q.metadata_filters:
+            print(f"[Metadata Filters] {processed_q.metadata_filters}")
+    if args.enable_expansion and processed_q.expansion and processed_q.expansion.is_expanded:
+        print(f"[Query Expansion] '{args.query}' -> '{processed_q.effective_query}'")
+
     results = engine.search(
-        query=args.query,
+        query=processed_q.effective_query,
         top_k=args.top_k,
         max_excerpt_len=args.excerpt_len,
+        metadata_filters=processed_q.metadata_filters if (args.enable_ner and args.apply_filters) else None,
     )
 
     print(f"\nSearch results for query: '{args.query}' (top {args.top_k}):")
@@ -87,6 +117,14 @@ def evaluate_command(args):
     with open(eval_path, "r", encoding="utf-8") as f:
         queries_data = json.load(f)
 
+    # Configure query pipeline if flags specified
+    query_pipe = None
+    if args.enable_expansion or args.enable_ner:
+        query_pipe = QueryPipeline(
+            enable_ner=args.enable_ner,
+            enable_expansion=args.enable_expansion,
+        )
+
     k_values = [int(k) for k in args.k_values.split(",")]
     evaluator = BenchmarkEvaluator(
         engine=engine,
@@ -98,6 +136,8 @@ def evaluate_command(args):
         queries_data=queries_data,
         dataset_name=eval_path.stem,
         corpus_name=Path(args.index_dir).name,
+        query_pipeline=query_pipe,
+        enable_filters=args.apply_filters,
     )
 
     print("\n=== Evaluation Results ===")
@@ -115,7 +155,116 @@ def evaluate_command(args):
         print(f"\nFull evaluation report saved to: {out_path.resolve()}")
 
 
-def main():
+def build_dense_command(args):
+    """Build and save dense semantic vector index using SentenceTransformers."""
+    logger.info(f"Loading chunks from {args.chunks_file}")
+    chunks = load_chunks_from_jsonl(args.chunks_file)
+    logger.info(f"Loaded {len(chunks)} chunks.")
+
+    engine = DenseSearchEngine(
+        model_name=args.model_name,
+        device=args.device,
+        batch_size=args.batch_size,
+    )
+    engine.build_index(chunks)
+    engine.save(args.index_dir)
+    print(f"\nSuccessfully built and saved dense index to: {args.index_dir}")
+
+
+def search_dense_command(args):
+    """Search dense semantic vector index."""
+    logger.info(f"Loading dense index from {args.index_dir}")
+    engine = DenseSearchEngine.load(args.index_dir, device=args.device)
+
+    # Configure query pipeline if flags specified
+    intent_clf = None
+    if args.enable_intent and args.intent_model:
+        intent_clf = IntentClassifier.load(args.intent_model)
+
+    pipeline = QueryPipeline(
+        intent_classifier=intent_clf,
+        enable_intent=args.enable_intent,
+        enable_ner=args.enable_ner,
+        enable_expansion=args.enable_expansion,
+    )
+
+    processed_q = pipeline.process_query(args.query)
+
+    if args.enable_intent and processed_q.intent:
+        print(f"\n[Intent Detected] {processed_q.intent.intent} (confidence: {processed_q.intent.confidence:.2f})")
+    if args.enable_ner and processed_q.entities:
+        ent_strs = [f"{e.text} ({e.label})" for e in processed_q.entities]
+        print(f"[Entities Recognized] {', '.join(ent_strs)}")
+        if processed_q.metadata_filters:
+            print(f"[Metadata Filters] {processed_q.metadata_filters}")
+    if args.enable_expansion and processed_q.expansion and processed_q.expansion.is_expanded:
+        print(f"[Query Expansion] '{args.query}' -> '{processed_q.effective_query}'")
+
+    results = engine.search(
+        query=processed_q.effective_query,
+        top_k=args.top_k,
+        max_excerpt_len=args.excerpt_len,
+        metadata_filters=processed_q.metadata_filters if (args.enable_ner and args.apply_filters) else None,
+    )
+
+    print(f"\n[Dense Search Results] Query: '{args.query}' (top {args.top_k}):")
+    if not results:
+        print("No matching results found.")
+        return
+
+    for res in results:
+        print(f"\n[Rank {res.rank}] Score: {res.score:.4f} | Chunk ID: {res.chunk_id}")
+        print(f"Document ID: {res.document_id} | Path: {res.source_path}")
+        print(f"Text excerpt:\n{res.text}")
+
+
+def evaluate_dense_command(args):
+    """Evaluate dense index against labeled evaluation dataset."""
+    logger.info(f"Loading dense index from {args.index_dir}")
+    engine = DenseSearchEngine.load(args.index_dir, device=args.device)
+
+    eval_path = Path(args.eval_file)
+    if not eval_path.is_file():
+        raise FileNotFoundError(f"Evaluation file not found: {eval_path}")
+
+    with open(eval_path, "r", encoding="utf-8") as f:
+        queries_data = json.load(f)
+
+    query_pipe = None
+    if args.enable_expansion or args.enable_ner:
+        query_pipe = QueryPipeline(
+            enable_ner=args.enable_ner,
+            enable_expansion=args.enable_expansion,
+        )
+
+    k_values = [int(k) for k in args.k_values.split(",")]
+    evaluator = BenchmarkEvaluator(
+        engine=engine,
+        k_values=k_values,
+        target_unit=args.target_unit,
+    )
+
+    report = evaluator.evaluate_queries(
+        queries_data=queries_data,
+        dataset_name=eval_path.stem,
+        corpus_name=Path(args.index_dir).name,
+        query_pipeline=query_pipe,
+        enable_filters=args.apply_filters,
+    )
+
+    print("\n=== Dense Evaluation Results ===")
+    print(json.dumps(report["aggregate_metrics"], indent=2))
+
+    if args.output_report:
+        out_path = Path(args.output_report)
+        if out_path.exists() and not args.force:
+            raise FileExistsError(
+                f"Report already exists at {out_path}. Use --force to overwrite or specify a new versioned path."
+            )
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2)
+        print(f"\nFull dense evaluation report saved to: {out_path.resolve()}")
     parser = argparse.ArgumentParser(description="Phase 2 Lexical Search CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -135,6 +284,11 @@ def main():
     search_parser.add_argument("--query", "-q", required=True, help="Search query string")
     search_parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of results to return")
     search_parser.add_argument("--excerpt-len", type=int, default=200, help="Max length of text excerpt")
+    search_parser.add_argument("--enable-intent", action="store_true", help="Enable intent classification")
+    search_parser.add_argument("--intent-model", help="Path to trained intent classifier directory")
+    search_parser.add_argument("--enable-ner", action="store_true", help="Enable entity recognition")
+    search_parser.add_argument("--apply-filters", action="store_true", help="Apply entity-derived metadata filters")
+    search_parser.add_argument("--enable-expansion", action="store_true", help="Enable synonym & spelling expansion")
     search_parser.set_defaults(func=search_command)
 
     # Evaluate subcommand
@@ -144,8 +298,48 @@ def main():
     eval_parser.add_argument("--output-report", "-o", help="Path to save evaluation report JSON")
     eval_parser.add_argument("--k-values", default="1,3,5,10", help="Comma-separated k values")
     eval_parser.add_argument("--target-unit", default="document_id", choices=["document_id", "chunk_id"])
+    eval_parser.add_argument("--enable-expansion", action="store_true", help="Enable query expansion in evaluation")
+    eval_parser.add_argument("--enable-ner", action="store_true", help="Enable NER filter extraction in evaluation")
+    eval_parser.add_argument("--apply-filters", action="store_true", help="Apply extracted metadata filters")
     eval_parser.add_argument("--force", action="store_true", help="Overwrite existing report file")
     eval_parser.set_defaults(func=evaluate_command)
+
+    # Build dense subcommand
+    build_dense_parser = subparsers.add_parser("build-dense", help="Build and save dense vector index")
+    build_dense_parser.add_argument("--chunks-file", "-c", required=True, help="Path to chunks.jsonl")
+    build_dense_parser.add_argument("--index-dir", "-o", required=True, help="Directory to save dense index")
+    build_dense_parser.add_argument("--model-name", default="all-MiniLM-L6-v2", help="SentenceTransformer model name")
+    build_dense_parser.add_argument("--device", default="cpu", help="Device to run inference on (cpu, cuda)")
+    build_dense_parser.add_argument("--batch-size", type=int, default=32, help="Embedding encoding batch size")
+    build_dense_parser.set_defaults(func=build_dense_command)
+
+    # Search dense subcommand
+    search_dense_parser = subparsers.add_parser("search-dense", help="Search the dense vector index")
+    search_dense_parser.add_argument("--index-dir", "-i", required=True, help="Path to saved dense index")
+    search_dense_parser.add_argument("--query", "-q", required=True, help="Search query string")
+    search_dense_parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of results to return")
+    search_dense_parser.add_argument("--excerpt-len", type=int, default=200, help="Max length of text excerpt")
+    search_dense_parser.add_argument("--device", default="cpu", help="Device to run inference on (cpu, cuda)")
+    search_dense_parser.add_argument("--enable-intent", action="store_true", help="Enable intent classification")
+    search_dense_parser.add_argument("--intent-model", help="Path to trained intent classifier directory")
+    search_dense_parser.add_argument("--enable-ner", action="store_true", help="Enable entity recognition")
+    search_dense_parser.add_argument("--apply-filters", action="store_true", help="Apply entity-derived metadata filters")
+    search_dense_parser.add_argument("--enable-expansion", action="store_true", help="Enable synonym & spelling expansion")
+    search_dense_parser.set_defaults(func=search_dense_command)
+
+    # Evaluate dense subcommand
+    eval_dense_parser = subparsers.add_parser("evaluate-dense", help="Evaluate dense index against labeled queries")
+    eval_dense_parser.add_argument("--index-dir", "-i", required=True, help="Path to saved dense index")
+    eval_dense_parser.add_argument("--eval-file", "-e", required=True, help="Path to queries JSON file")
+    eval_dense_parser.add_argument("--output-report", "-o", help="Path to save evaluation report JSON")
+    eval_dense_parser.add_argument("--k-values", default="1,3,5,10", help="Comma-separated k values")
+    eval_dense_parser.add_argument("--target-unit", default="document_id", choices=["document_id", "chunk_id"])
+    eval_dense_parser.add_argument("--device", default="cpu", help="Device to run inference on (cpu, cuda)")
+    eval_dense_parser.add_argument("--enable-expansion", action="store_true", help="Enable query expansion in evaluation")
+    eval_dense_parser.add_argument("--enable-ner", action="store_true", help="Enable NER filter extraction in evaluation")
+    eval_dense_parser.add_argument("--apply-filters", action="store_true", help="Apply extracted metadata filters")
+    eval_dense_parser.add_argument("--force", action="store_true", help="Overwrite existing report file")
+    eval_dense_parser.set_defaults(func=evaluate_dense_command)
 
     args = parser.parse_args()
     args.func(args)

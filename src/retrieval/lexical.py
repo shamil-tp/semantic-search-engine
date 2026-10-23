@@ -96,9 +96,13 @@ class LexicalSearchEngine:
         top_k: int = 10,
         min_score: float = 0.0,
         max_excerpt_len: Optional[int] = None,
+        metadata_filters: Optional[Dict[str, Any]] = None,
     ) -> List[SearchResult]:
         """
         Retrieve and rank top_k chunks for the given query.
+        
+        Supports optional metadata_filters:
+        e.g., {'extension': '.md'} or {'document_id': '...'}
         
         Deterministic tie-breaking:
         1. Higher score first (-score)
@@ -128,6 +132,32 @@ class LexicalSearchEngine:
         candidate_indices = np.where(scores > min_score)[0]
         if len(candidate_indices) == 0:
             return []
+
+        # Apply metadata filters if provided
+        if metadata_filters:
+            filtered_indices = []
+            for idx in candidate_indices:
+                chunk = self.chunks[idx]
+                match = True
+                for filter_k, filter_v in metadata_filters.items():
+                    # Check top-level chunk attributes first
+                    if hasattr(chunk, filter_k):
+                        if getattr(chunk, filter_k) != filter_v:
+                            match = False
+                            break
+                    # Check chunk metadata dictionary
+                    elif filter_k in chunk.metadata:
+                        if chunk.metadata[filter_k] != filter_v:
+                            match = False
+                            break
+                    else:
+                        match = False
+                        break
+                if match:
+                    filtered_indices.append(idx)
+            candidate_indices = np.array(filtered_indices, dtype=int)
+            if len(candidate_indices) == 0:
+                return []
 
         # Deterministic sorting
         # Sort key: (-score, doc_id, chunk_index)
