@@ -13,6 +13,7 @@ from src.query.intent import IntentClassifier
 from src.query.ner import EntityRecognizer
 from src.query.pipeline import QueryPipeline
 from src.retrieval.dense import DenseSearchEngine
+from src.retrieval.ann import HnswSearchEngine
 from src.retrieval.lexical import LexicalSearchEngine
 
 logging.basicConfig(
@@ -265,6 +266,33 @@ def evaluate_dense_command(args):
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2)
         print(f"\nFull dense evaluation report saved to: {out_path.resolve()}")
+
+
+def build_ann_command(args):
+    """Build HNSW ANN artifacts from an existing exact dense index."""
+    dense = DenseSearchEngine.load(args.dense_index_dir, device=args.device)
+    engine = HnswSearchEngine.from_dense(
+        dense,
+        m=args.m,
+        ef_construction=args.ef_construction,
+        ef_search=args.ef_search,
+    )
+    engine.save(args.index_dir)
+    print(f"\nSuccessfully built and saved HNSW ANN index to: {args.index_dir}")
+
+
+def search_ann_command(args):
+    """Search a persisted HNSW ANN index."""
+    engine = HnswSearchEngine.load(args.index_dir, device=args.device)
+    results = engine.search(args.query, top_k=args.top_k, max_excerpt_len=args.excerpt_len)
+    print(f"\n[ANN Search Results] Query: '{args.query}' (top {args.top_k}):")
+    if not results:
+        print("No matching results found.")
+        return
+    for result in results:
+        print(f"\n[Rank {result.rank}] Score: {result.score:.4f} | Chunk ID: {result.chunk_id}")
+        print(f"Document ID: {result.document_id} | Path: {result.source_path}")
+        print(f"Text excerpt:\n{result.text}")
     parser = argparse.ArgumentParser(description="Phase 2 Lexical Search CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -340,6 +368,23 @@ def evaluate_dense_command(args):
     eval_dense_parser.add_argument("--apply-filters", action="store_true", help="Apply extracted metadata filters")
     eval_dense_parser.add_argument("--force", action="store_true", help="Overwrite existing report file")
     eval_dense_parser.set_defaults(func=evaluate_dense_command)
+
+    build_ann_parser = subparsers.add_parser("build-ann", help="Build a persisted HNSW index from a dense index")
+    build_ann_parser.add_argument("--dense-index-dir", required=True, help="Path to the exact dense index")
+    build_ann_parser.add_argument("--index-dir", "-o", required=True, help="Directory for ANN artifacts")
+    build_ann_parser.add_argument("--m", type=int, default=16, help="HNSW graph degree")
+    build_ann_parser.add_argument("--ef-construction", type=int, default=200, help="HNSW construction search breadth")
+    build_ann_parser.add_argument("--ef-search", type=int, default=100, help="HNSW query search breadth")
+    build_ann_parser.add_argument("--device", default="cpu", help="Device to encode queries on")
+    build_ann_parser.set_defaults(func=build_ann_command)
+
+    search_ann_parser = subparsers.add_parser("search-ann", help="Search a persisted HNSW ANN index")
+    search_ann_parser.add_argument("--index-dir", "-i", required=True, help="Path to ANN artifacts")
+    search_ann_parser.add_argument("--query", "-q", required=True, help="Search query string")
+    search_ann_parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of results to return")
+    search_ann_parser.add_argument("--excerpt-len", type=int, default=200, help="Maximum text excerpt length")
+    search_ann_parser.add_argument("--device", default="cpu", help="Device to encode queries on")
+    search_ann_parser.set_defaults(func=search_ann_command)
 
     args = parser.parse_args()
     args.func(args)

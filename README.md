@@ -97,6 +97,19 @@ Each retrieved search item includes:
 ### Metric Meaning and Limitations
 TF-IDF measures exact lexical token overlap and frequency inverse weights. It does not measure semantic similarity, synonyms, or conceptual closeness (which will be addressed in dense retrieval in Phase 4). Scores are lexical relevance signals rather than probabilities.
 
+## Phase 5 — Vector Index and Scalable Retrieval
+
+Phase 5 adds an optional persisted HNSW approximate-nearest-neighbour (ANN) index over the embeddings produced by Phase 4. Exact dense search remains available as the comparison oracle; the ANN index does not re-embed documents.
+
+Install the new dependency from the project metadata, build the exact dense index, then build the ANN artifact from it:
+
+```bash
+python -m src.retrieval.cli build-ann --dense-index-dir artifacts/indices/dense_index --index-dir artifacts/indices/hnsw_index
+python -m src.retrieval.cli search-ann --index-dir artifacts/indices/hnsw_index --query "vector embeddings in semantic search" --top-k 5
+```
+
+The HNSW artifact includes `hnsw_index.bin`, `chunks.jsonl`, and `ann_metadata.json`. If any artifact is absent, incompatible, or corrupt, rebuild it from the matching dense index rather than attempting partial recovery. Before selecting ANN in production, measure Recall@k against exact dense retrieval and record latency, memory, build time, and update cost. Tune `--ef-search` only from those measurements.
+
 ## Phase 3 — Classical Text ML and Query Understanding
 
 Phase 3 introduces classical text machine learning components for query understanding:
