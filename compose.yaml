@@ -1,0 +1,17 @@
+services:
+  semantic-search:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      LEXICAL_INDEX_DIR: artifacts/indices/lexical_sample
+      SEARCH_MODE: lexical
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+    read_only: true
+    tmpfs:
+      - /tmp
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G

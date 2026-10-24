@@ -1,210 +1,102 @@
 # Semantic Search Engine
 
-A modular, reproducible semantic search engine in Python spanning from raw document ingestion and preprocessing to vector indexing, hybrid retrieval, and REST API deployment.
+A small, reproducible Python search service for public text and Markdown documents. It ingests normalized chunks, builds a persisted TF-IDF index, and serves validated search requests. Dense, ANN, RRF, and cross-encoder components remain optional: they are used only after matching artifacts and evaluation evidence exist.
 
-## Phase 1 — Data Ingestion and Preparation
-
-Phase 1 provides a modular, reliable pipeline that discovers raw text (`.txt`) and Markdown (`.md`) files, performs safe UTF-8 loading, normalizes whitespace and Unicode (NFC), strips duplicate and empty documents, generates configurable overlapping chunks, profiles corpus statistics using pandas/NumPy, and exports structured JSONL artifacts.
-
-### Repository Layout
+## Architecture
 
 ```text
-├── src/
-│   ├── __init__.py
-│   └── ingestion/
-│       ├── __init__.py
-│       ├── schemas.py       # ProcessedDocument and DocumentChunk dataclass models
-│       ├── loader.py        # Recursive file discovery and safe UTF-8 loading
-│       ├── cleaner.py       # Unicode normalization, boundary preservation, deduplication
-│       ├── chunker.py       # Overlapping word-based chunker with character offsets
-│       ├── statistics.py    # pandas/NumPy corpus profiling and metrics summary
-│       ├── pipeline.py      # Pipeline orchestrator
-│       └── cli.py           # Command-line interface
-├── tests/
-│   └── test_ingestion.py    # Comprehensive unit and integration test suite
-├── data/
-│   ├── sample_corpus/       # Representative test documents (.txt, .md)
-│   └── processed/           # Processed JSONL outputs (ignored by Git)
-├── pyproject.toml           # Project metadata and test configuration
-└── README.md
+raw .txt/.md -> ingestion + deduplication -> chunks.jsonl
+                                         |-> lexical TF-IDF index -> Flask API
+                                         |-> optional dense index -> RRF (opt-in)
 ```
 
-### Installation
+The included corpus is public sample material, so document metadata is available through the API. Do not expose `GET /api/v1/documents/<id>` for restricted corpora without adding real document-level authorization before retrieval/output.
 
-Requires Python 3.10+:
+## Clean setup
+
+Python 3.10+ is required. The checked-in [requirements.lock](requirements.lock) records the verified environment; `pyproject.toml` remains the project source of truth.
 
 ```bash
-pip install -e .
-pip install pytest
+python -m venv .venv
+.venv\Scripts\activate
+python -m pip install -e ".[dev,production]"
 ```
 
-### Running the Ingestion Pipeline
-
-To run data ingestion on a directory of documents:
+If using the exact verified versions instead:
 
 ```bash
-python -m src.ingestion.cli --input-dir data/sample_corpus --output-dir data/processed --chunk-size 500 --chunk-overlap 50
+python -m pip install -r requirements.lock
+python -m pip install -e .
 ```
 
-## Phase 2 — Baseline Search (TF-IDF Lexical Retrieval)
+`hnswlib` is optional in practice: it could not be installed under the verified Python 3.14 environment, so ANN tests are skipped there. Use a supported Python/runtime and `pip install -e .` to enable it.
 
-Phase 2 builds a reproducible lexical retrieval baseline using `scikit-learn`'s `TfidfVectorizer` with sparse matrix cosine similarity scoring, index persistence, and evaluation against labeled queries.
+## Build and evaluate
 
-### Building the Lexical Index
-
-To index Phase 1 chunks into a persistent TF-IDF index:
+The repository includes a processed sample corpus. To rebuild everything from raw files:
 
 ```bash
-python -m src.retrieval.cli build --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/lexical_index
+python -m src.ingestion.cli --input-dir data/sample_corpus --output-dir data/processed --chunk-size 50 --chunk-overlap 10
+python -m src.retrieval.cli build --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/lexical_sample
+python -m src.evaluation.cli --lexical-index-dir artifacts/indices/lexical_sample --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/reports/pipeline_comparison.json
 ```
 
-### Searching the Index
-
-To query the saved index without re-indexing:
+Dense retrieval is an explicit offline job; it never runs in an API request:
 
 ```bash
-python -m src.retrieval.cli search --index-dir artifacts/indices/lexical_index --query "vector embeddings in semantic search" --top-k 5
+python -m src.retrieval.cli build-dense --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/dense_index --model-name all-MiniLM-L6-v2
+python -m src.evaluation.cli --lexical-index-dir artifacts/indices/lexical_sample --dense-index-dir artifacts/indices/dense_index --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/reports/pipeline_comparison.json
 ```
 
-### Running Evaluation Benchmarks
+The second command evaluates lexical, dense, and RRF on exactly the supplied queries and records p50/p95 in-process latency. It does not split the current four-query dataset: it is too small to support valid tuning/test claims. Reranking stays disabled and no knowledge graph is added; see [ADR 003](docs/decisions/003_hybrid_retrieval_and_reranking.md) and [ADR 004](docs/decisions/004_graph_retrieval_assessment.md).
 
-To evaluate the index against ground-truth query relevance judgments and save a versioned baseline report:
+## API
+
+Copy `.env.example` values into your deployment environment. Start development mode after building the lexical artifact:
 
 ```bash
-python -m src.retrieval.cli evaluate --index-dir artifacts/indices/lexical_index --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/baselines/baseline_v1.json --k-values 1,3,5,10
+python -m src.api.app
 ```
 
-> **Note on Reports**: The evaluator refuses to silently overwrite existing reports unless `--force` is explicitly provided, ensuring baseline reproducibility and immutability.
-
-### Search Result Schema
-
-Each retrieved search item includes:
-- `rank`: Result rank starting at 1.
-- `chunk_id`: Identifier formatted as `{document_id}_c{chunk_index}`.
-- `document_id`: Parent document identifier.
-- `score`: Normalized TF-IDF cosine similarity score between query and chunk vector.
-- `text`: Chunk text or excerpt.
-- `source_path`: Original file path.
-- `chunk_index`: 0-indexed position within the document.
-- `metadata`: Parent document metadata (file size, timestamps, word/char counts).
-
-### Evaluation Metrics
-
-- **Recall@k**: Fraction of known relevant documents/chunks retrieved in the top $k$ items.
-- **Mean Reciprocal Rank (MRR)**: Mean reciprocal rank ($1 / \text{rank}$) of the first retrieved relevant item across queries.
-- **nDCG@k**: Normalized Discounted Cumulative Gain evaluating ranked position quality with logarithmic position discounts.
-
-### Metric Meaning and Limitations
-TF-IDF measures exact lexical token overlap and frequency inverse weights. It does not measure semantic similarity, synonyms, or conceptual closeness (which will be addressed in dense retrieval in Phase 4). Scores are lexical relevance signals rather than probabilities.
-
-## Phase 5 — Vector Index and Scalable Retrieval
-
-Phase 5 adds an optional persisted HNSW approximate-nearest-neighbour (ANN) index over the embeddings produced by Phase 4. Exact dense search remains available as the comparison oracle; the ANN index does not re-embed documents.
-
-Install the new dependency from the project metadata, build the exact dense index, then build the ANN artifact from it:
+Production on Linux uses Gunicorn (Windows may use Waitress):
 
 ```bash
-python -m src.retrieval.cli build-ann --dense-index-dir artifacts/indices/dense_index --index-dir artifacts/indices/hnsw_index
-python -m src.retrieval.cli search-ann --index-dir artifacts/indices/hnsw_index --query "vector embeddings in semantic search" --top-k 5
+gunicorn --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 30 "src.api.app:create_app()"
 ```
-
-The HNSW artifact includes `hnsw_index.bin`, `chunks.jsonl`, and `ann_metadata.json`. Its manifest records the format, HNSW library/version, cosine metric, model, dimension, corpus and catalog fingerprints, and HNSW settings. If any artifact is absent, incompatible, or corrupt, rebuild it from the matching dense index rather than attempting partial recovery. Before selecting ANN in production, measure Recall@k against exact dense retrieval and record latency, memory, build time, and update cost. Tune `--ef-search` only from those measurements.
-
-## Phase 6 — Hybrid Retrieval and Reranking
-
-Phase 6 provides explicit reciprocal-rank fusion (RRF) across lexical and dense candidates. Their scores are not directly mixed: RRF combines their ranks, which keeps the two retrieval signals comparable. A cross-encoder reranker is optional and only sees the configured leading fused candidates.
 
 ```bash
-python -m src.retrieval.cli search-hybrid --lexical-index-dir artifacts/indices/lexical_index --dense-index-dir artifacts/indices/dense_index --query "vector embeddings in semantic search" --top-k 5
-python -m src.retrieval.cli search-hybrid --lexical-index-dir artifacts/indices/lexical_index --dense-index-dir artifacts/indices/dense_index --query "vector embeddings in semantic search" --rerank-model cross-encoder/ms-marco-MiniLM-L-6-v2 --rerank-top-n 20
+curl http://127.0.0.1:8000/health
+curl -X POST http://127.0.0.1:8000/api/v1/search -H "Content-Type: application/json" -d '{"query":"vector embeddings","top_k":3,"filters":{"extension":".md"}}'
+curl http://127.0.0.1:8000/api/v1/documents/a3090451a0a256d7
 ```
 
-Reranking is disabled unless `--rerank-model` is supplied. Before enabling either hybrid mode by default, compare lexical, dense, RRF, and RRF-plus-reranker runs on the same held-out evaluation set and record quality and latency.
+Successful search responses contain `query`, `top_k`, `count`, `latency_ms`, and ranked results. Invalid input returns a consistent JSON error, for example `{"error":{"code":"invalid_request","message":"query must be a non-empty string."}}`. The API accepts only nonempty string queries, `top_k` from 1–20 (configurable), and an `extension` filter. Its request body is limited to 16 KiB by default. CORS is disabled unless a request Origin exactly matches `ALLOWED_ORIGINS`.
 
-## Phase 3 — Classical Text ML and Query Understanding
-
-Phase 3 introduces classical text machine learning components for query understanding:
-- **Intent Classification**: TF-IDF + Linear SVM (`LinearSVC`) with calibrated confidence scores classifying user queries into `informational`, `technical_spec`, or `troubleshooting`.
-- **Named Entity Recognition (NER) & Metadata Filtering**: Extracts structured entities (file extensions, schema attributes, document IDs, algorithms) to apply deterministic metadata filters.
-- **Spelling Normalization & Controlled Expansion**: Maps typos to canonical domain terms and attaches domain synonyms while preserving the original query and logging all expansion terms.
-
-> **Phase 3 Rule**: In accordance with `CLAUDE.md`, all query understanding stages are **disabled by default** to prevent unintended query drift until an evaluation justifies activation. See [docs/decisions/001_query_understanding_ablation.md](docs/decisions/001_query_understanding_ablation.md).
-
-### Training the Intent Classifier
-
-To train and persist the intent classifier:
+## Tests and measured baseline
 
 ```bash
-python -m src.query.cli train-intent --output-dir artifacts/models/intent_model
+pytest --basetemp .pytest-tmp -q
+ruff check src tests
 ```
 
-### Analyzing Queries via CLI
+The committed lexical baseline (`artifacts/baselines/baseline_v1.json`) evaluated all four synthetic queries at MRR, Recall@1, and nDCG@1 of 1.0. The latest measured run is recorded in [the evaluation report](docs/evaluation_report.md). This is a tiny, synthetic, non-held-out set—not a production relevance claim.
 
-To inspect detected intents, extracted entities, and proposed expansions:
+## Container deployment and operations
+
+`Dockerfile` deliberately copies only the prebuilt lexical artifact. Build and test it locally where Docker is available:
 
 ```bash
-python -m src.query.cli analyze --query "what is sematic search in .md files" --intent-model artifacts/models/intent_model
+docker build -t semantic-search .
+docker run --rm -p 8000:8000 semantic-search
 ```
 
-### Searching with Query Understanding Flags
+`compose.yaml` supplies read-only filesystem and CPU/memory limits. The image has a health check at `/health`.
 
-Query understanding features can be selectively enabled during search:
+To re-index, build into a new versioned artifact directory, run evaluation/API smoke tests against it, then atomically change `LEXICAL_INDEX_DIR` (and `DENSE_INDEX_DIR` only when they match) and restart the service. Roll back by restoring the prior environment value and restarting. Never overwrite an artifact being served.
 
-```bash
-python -m src.retrieval.cli search \
-  --index-dir artifacts/indices/lexical_sample \
-  --query "what is sematic search in .md files" \
-  --enable-intent --intent-model artifacts/models/intent_model \
-  --enable-ner --apply-filters \
-  --enable-expansion
-```
+## Limitations and future work
 
-#### CLI Options
-
-- `--input-dir`, `-i`: (Required) Path to the raw document directory.
-- `--output-dir`, `-o`: (Required) Directory where processed JSONL files and statistics will be saved.
-- `--chunk-size`: Number of words per chunk (default: `500`).
-- `--chunk-overlap`: Number of overlapping words between consecutive chunks (default: `50`).
-- `--extensions`: Supported file extensions (default: `.txt .md`).
-- `--verbose`, `-v`: Enable debug-level logging.
-
-### Output Schemas
-
-Outputs are generated in the specified `--output-dir`:
-
-1. **`documents.jsonl`**: Each line contains a cleaned, deduplicated document:
-   - `document_id`: Deterministic 16-character SHA-256 hash of normalized source path.
-   - `source_path`: Normalized POSIX source file path.
-   - `content_hash`: SHA-256 hash of normalized text used for deduplication.
-   - `text`: Cleaned text preserving paragraph boundaries.
-   - `metadata`: File name, extension, size in bytes, and timestamps.
-
-2. **`chunks.jsonl`**: Each line contains a chunk ready for indexing:
-   - `chunk_id`: Deterministic ID formatted as `{document_id}_c{chunk_index}`.
-   - `document_id`: Parent document ID.
-   - `source_path`: Source file path.
-   - `chunk_index`: 0-indexed position within the document.
-   - `text`: Chunk text content.
-   - `start_char`: Starting character offset in the parent document text.
-   - `end_char`: Ending character offset in the parent document text.
-   - `metadata`: Parent metadata extended with `word_count` and `char_count`.
-
-3. **`statistics.json`**: Tabular profiling generated with pandas and NumPy:
-   - Discovery counts, skipped unsupported files, failures with error breakdown, empty files, and duplicates.
-   - Document length summary (min, max, mean, median for words and characters).
-   - Chunk length summary (min, max, mean, median for words and characters).
-
-### Running Tests
-
-Execute the automated test suite using `pytest`:
-
-```bash
-pytest -v
-```
-
-### Architectural Decisions & Known Limitations
-
-- **Chunking Strategy**: Word-boundary regex splitting (`\S+`) is used to guarantee that chunks split cleanly at words rather than arbitrary characters, while tracking character offsets against the parent text.
-- **Deduplication**: Content deduplication uses SHA-256 hashes of NFC-normalized, whitespace-standardized text. Indiscriminate stopword or punctuation stripping is avoided to preserve downstream semantic context.
-- **Deterministic IDs**: Source path hashing ensures repeatable document and chunk IDs across runs.
-- **Limitations**: Currently supports `.txt` and `.md`. Document formats like PDF and DOCX or OCR workflows will require dedicated loaders in future extensions.
+- The corpus/evaluation set is intentionally tiny and synthetic; obtain separate training, validation, and held-out test judgments before selecting RRF parameters or enabling a reranker.
+- No authentication or document-level ACL exists because the sample corpus is public.
+- Supported ingestion formats are `.txt` and `.md`.
+- ANN, graph retrieval, learned ranking, and reranking require measured benefit and are not defaults.

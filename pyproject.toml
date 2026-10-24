@@ -15,6 +15,7 @@ dependencies = [
     "sentence-transformers>=3.0.0",
     "torch>=2.2.0",
     "hnswlib>=0.8.0",
+    "Flask>=3.0,<4.0",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +23,15 @@ dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
 ]
+production = [
+    "gunicorn>=22.0,<24.0; platform_system != 'Windows'",
+    "waitress>=3.0,<4.0; platform_system == 'Windows'",
+]
+
+[project.scripts]
+semantic-search = "src.retrieval.cli:main"
+semantic-search-api = "src.api.app:main"
+semantic-search-evaluate = "src.evaluation.cli:main"
 
 [tool.pytest.ini_options]
 minversion = "7.0"
