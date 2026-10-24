@@ -86,8 +86,119 @@ body {
 /* Main Content */
 .main-content {
     flex: 1;
-    padding-top: 2rem;
+    padding-top: 1.5rem;
     padding-bottom: 3rem;
+}
+
+/* Tabs */
+.search-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 2px solid var(--border-color);
+}
+
+.tab-btn {
+    padding: 0.75rem 1.25rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    cursor: pointer;
+    transition: var(--transition);
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+}
+
+.tab-btn.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+}
+
+.tab-view {
+    display: block;
+}
+
+.tab-view[hidden] {
+    display: none;
+}
+
+/* Upload Dropzone */
+.section-title {
+    font-size: 1.25rem;
+    margin-bottom: 0.25rem;
+}
+
+.section-desc {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.25rem;
+}
+
+.upload-dropzone {
+    border: 2px dashed var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1.5rem;
+    text-align: center;
+    background-color: #fafbfc;
+    transition: var(--transition);
+    margin-bottom: 1.5rem;
+}
+
+.upload-dropzone:hover {
+    border-color: var(--primary-color);
+}
+
+.file-input {
+    display: none;
+}
+
+.dropzone-label {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    cursor: pointer;
+    margin-bottom: 1rem;
+}
+
+.dropzone-icon {
+    font-size: 2rem;
+}
+
+.dropzone-text {
+    font-size: 1rem;
+    color: var(--text-primary);
+}
+
+.dropzone-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.selected-file-info {
+    font-size: 0.9rem;
+    color: var(--primary-color);
+    font-weight: 500;
+    margin-bottom: 1rem;
+}
+
+.active-session-banner {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background-color: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: var(--radius-sm);
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+    color: #1e40af;
+    margin-bottom: 1.25rem;
 }
 
 /* Search Controls */

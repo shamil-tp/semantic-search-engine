@@ -20,11 +20,12 @@ from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.exceptions import HTTPException, RequestEntityTooLarge
 
 from src.retrieval.dense import DenseSearchEngine
+from src.retrieval.document_session import DocumentSessionManager
 from src.retrieval.hybrid import HybridSearchEngine
 from src.retrieval.lexical import LexicalSearchEngine
 
 DEFAULT_MAX_TOP_K = 20
-DEFAULT_MAX_REQUEST_BYTES = 16 * 1024
+DEFAULT_MAX_REQUEST_BYTES = 50 * 1024 * 1024  # 50 MB to accommodate file uploads and large documents
 
 
 class JsonFormatter(logging.Formatter):
@@ -165,6 +166,7 @@ def create_app(
         chunk.document_id: chunk for chunk in catalog_chunks
     }
     app.extensions["search_mode"] = mode
+    app.extensions["session_manager"] = DocumentSessionManager()
 
     @app.after_request
     def add_cors(response: Response) -> Response:
@@ -244,6 +246,81 @@ def create_app(
     @app.post("/api/v1/search")
     def api_v1_search():
         return handle_search()
+
+    @app.post("/api/upload")
+    def upload_document():
+        """Upload and index a document (.pdf, .txt, .md, .json) for in-doc semantic search."""
+        if "file" not in request.files:
+            return _error("No file provided in form-data ('file').", 400, "missing_file")
+        file = request.files["file"]
+        if not file.filename:
+            return _error("No file selected.", 400, "empty_filename")
+
+        filename = file.filename
+        allowed_exts = {".pdf", ".txt", ".md", ".json"}
+        ext = Path(filename).suffix.lower()
+        if ext not in allowed_exts:
+            return _error(f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(allowed_exts))}", 400, "unsupported_extension")
+
+        file_bytes = file.read()
+        if not file_bytes:
+            return _error("Uploaded file is empty.", 400, "empty_file")
+
+        session_mgr: DocumentSessionManager = app.extensions["session_manager"]
+        try:
+            session = session_mgr.index_uploaded_file(file_bytes, filename)
+            return jsonify({
+                "status": "ok",
+                "session_id": session.session_id,
+                "filename": session.filename,
+                "total_chunks": session.total_chunks,
+                "char_length": session.char_length,
+                "message": f"Successfully indexed '{filename}' into {session.total_chunks} semantic chunks."
+            })
+        except Exception as exc:
+            app.logger.warning(f"Upload indexing failed for '{filename}': {exc}")
+            return _error(f"Could not process document: {exc}", 400, "processing_error")
+
+    @app.post("/api/search-doc")
+    def search_uploaded_document():
+        """Search strictly inside an uploaded document session."""
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return _error("request body must be a JSON object.", 400, "invalid_json")
+
+        session_id = body.get("session_id")
+        query = body.get("query")
+        if not session_id or not isinstance(session_id, str):
+            return _error("session_id must be provided.", 400, "invalid_session_id")
+        if not query or not isinstance(query, str) or not query.strip():
+            return _error("query must be a non-empty string.", 400, "invalid_query")
+
+        top_k = body.get("top_k", 5)
+        mode = body.get("mode", "semantic") # 'semantic' or 'lexical'
+
+        session_mgr: DocumentSessionManager = app.extensions["session_manager"]
+        started = time.perf_counter()
+        try:
+            results = session_mgr.search_session(
+                session_id=session_id.strip(),
+                query=query.strip(),
+                top_k=min(top_k, 20),
+                search_mode=mode,
+            )
+            latency_ms = round((time.perf_counter() - started) * 1_000, 3)
+            return jsonify({
+                "session_id": session_id,
+                "query": query,
+                "search_mode": mode,
+                "count": len(results),
+                "latency_ms": latency_ms,
+                "results": [_result_to_dict(r) for r in results],
+            })
+        except KeyError as exc:
+            return _error(str(exc), 404, "session_not_found")
+        except Exception as exc:
+            app.logger.exception(f"Session search failed: {exc}")
+            return _error(f"Search failed: {exc}", 500, "search_error")
 
     @app.get("/api/v1/documents/<document_id>")
     def document(document_id: str):

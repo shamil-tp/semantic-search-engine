@@ -19,48 +19,124 @@
     </header>
 
     <main class="container main-content">
-        <section class="search-section" aria-label="Search Controls">
-            <form id="search-form" class="search-form" role="search">
-                <div class="search-bar">
-                    <label for="search-input" class="visually-hidden">Search query</label>
-                    <input 
-                        type="text" 
-                        id="search-input" 
-                        name="query" 
-                        class="search-input" 
-                        placeholder="Type keywords, concepts, or technical terms..." 
-                        autocomplete="off" 
-                        required 
-                        autofocus
-                    >
-                    <button type="submit" id="search-button" class="btn btn-primary" aria-label="Submit search">
-                        <span class="btn-text">Search</span>
+        <!-- Navigation Tabs -->
+        <nav class="search-tabs" aria-label="Search Views">
+            <button type="button" class="tab-btn active" id="tab-global" data-tab="global-view">
+                🌐 Search Entire Index
+            </button>
+            <button type="button" class="tab-btn" id="tab-upload" data-tab="upload-view">
+                📄 Upload & Search Within Document
+            </button>
+        </nav>
+
+        <!-- View 1: Global Search (Pre-indexed corpus & crawler) -->
+        <div id="global-view" class="tab-view active">
+            <section class="search-section" aria-label="Search Controls">
+                <form id="search-form" class="search-form" role="search">
+                    <div class="search-bar">
+                        <label for="search-input" class="visually-hidden">Search query</label>
+                        <input 
+                            type="text" 
+                            id="search-input" 
+                            name="query" 
+                            class="search-input" 
+                            placeholder="Type keywords, concepts, or technical terms..." 
+                            autocomplete="off" 
+                            required 
+                            autofocus
+                        >
+                        <button type="submit" id="search-button" class="btn btn-primary" aria-label="Submit search">
+                            <span class="btn-text">Search</span>
+                            <span class="spinner" aria-hidden="true"></span>
+                        </button>
+                    </div>
+
+                    <div class="search-options">
+                        <div class="option-group">
+                            <label for="top-k-select">Max results:</label>
+                            <select id="top-k-select" name="top_k" class="select-control">
+                                <option value="5" selected>5</option>
+                                <option value="10">10</option>
+                                <option value="15">15</option>
+                                <option value="20">20</option>
+                            </select>
+                        </div>
+
+                        <div class="option-group">
+                            <label for="extension-filter">Filter extension:</label>
+                            <select id="extension-filter" name="extension" class="select-control">
+                                <option value="" selected>All files</option>
+                                <option value=".md">Markdown (.md)</option>
+                                <option value=".txt">Text (.txt)</option>
+                            </select>
+                        </div>
+                    </div>
+                </form>
+            </section>
+        </div>
+
+        <!-- View 2: Upload Document & Search Inside It -->
+        <div id="upload-view" class="tab-view" hidden>
+            <section class="search-section" aria-label="Document Upload">
+                <h2 class="section-title">Upload a Document</h2>
+                <p class="section-desc">Upload a PDF, Markdown, Text, or JSON document to instantly run semantic search directly across its contents.</p>
+
+                <form id="upload-form" class="upload-dropzone">
+                    <input type="file" id="doc-file-input" class="file-input" accept=".pdf,.txt,.md,.json" required>
+                    <label for="doc-file-input" class="dropzone-label">
+                        <span class="dropzone-icon">📁</span>
+                        <span class="dropzone-text"><strong>Click to choose file</strong> or drag & drop</span>
+                        <span class="dropzone-hint">Supported: PDF, TXT, MD, JSON (up to 16MB)</span>
+                    </label>
+                    <div id="selected-file-info" class="selected-file-info" hidden></div>
+                    <button type="submit" id="upload-btn" class="btn btn-primary" disabled>
+                        <span class="btn-text">Index & Ready Document</span>
                         <span class="spinner" aria-hidden="true"></span>
                     </button>
-                </div>
+                </form>
 
-                <div class="search-options">
-                    <div class="option-group">
-                        <label for="top-k-select">Max results:</label>
-                        <select id="top-k-select" name="top_k" class="select-control">
-                            <option value="5" selected>5</option>
-                            <option value="10">10</option>
-                            <option value="15">15</option>
-                            <option value="20">20</option>
-                        </select>
+                <!-- Search inside uploaded document -->
+                <div id="doc-search-container" class="doc-search-container" hidden>
+                    <div class="active-session-banner">
+                        <span>Active Document: <strong id="active-doc-name"></strong></span>
+                        <span class="badge" id="active-doc-chunks">0 chunks</span>
                     </div>
 
-                    <div class="option-group">
-                        <label for="extension-filter">Filter extension:</label>
-                        <select id="extension-filter" name="extension" class="select-control">
-                            <option value="" selected>All files</option>
-                            <option value=".md">Markdown (.md)</option>
-                            <option value=".txt">Text (.txt)</option>
-                        </select>
-                    </div>
+                    <form id="doc-search-form" class="search-form">
+                        <div class="search-bar">
+                            <input 
+                                type="text" 
+                                id="doc-search-input" 
+                                class="search-input" 
+                                placeholder="Search semantically inside this document..." 
+                                required
+                            >
+                            <button type="submit" id="doc-search-btn" class="btn btn-primary">
+                                <span class="btn-text">Search In Doc</span>
+                                <span class="spinner" aria-hidden="true"></span>
+                            </button>
+                        </div>
+                        <div class="search-options">
+                            <div class="option-group">
+                                <label for="doc-search-mode">Search Mode:</label>
+                                <select id="doc-search-mode" class="select-control">
+                                    <option value="semantic" selected>🧠 Semantic Vector Search</option>
+                                    <option value="lexical">🔤 Exact Keyword / TF-IDF</option>
+                                </select>
+                            </div>
+                            <div class="option-group">
+                                <label for="doc-top-k">Max results:</label>
+                                <select id="doc-top-k" class="select-control">
+                                    <option value="5" selected>5</option>
+                                    <option value="10">10</option>
+                                    <option value="15">15</option>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
                 </div>
-            </form>
-        </section>
+            </section>
+        </div>
 
         <section id="status-region" class="status-region" aria-live="polite">
             <div id="loading-state" class="loading-state" hidden>

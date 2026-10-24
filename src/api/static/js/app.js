@@ -15,7 +15,149 @@ document.addEventListener("DOMContentLoaded", () => {
     const emptyState = document.getElementById("empty-state");
     const resultsList = document.getElementById("results-list");
 
-    // Handle search submission
+    // Tabs switching
+    const tabGlobal = document.getElementById("tab-global");
+    const tabUpload = document.getElementById("tab-upload");
+    const globalView = document.getElementById("global-view");
+    const uploadView = document.getElementById("upload-view");
+
+    tabGlobal.addEventListener("click", () => {
+        tabGlobal.classList.add("active");
+        tabUpload.classList.remove("active");
+        globalView.hidden = false;
+        uploadView.hidden = true;
+        clearMessages();
+    });
+
+    tabUpload.addEventListener("click", () => {
+        tabUpload.classList.add("active");
+        tabGlobal.classList.remove("active");
+        uploadView.hidden = false;
+        globalView.hidden = true;
+        clearMessages();
+    });
+
+    // File Upload handling
+    const uploadForm = document.getElementById("upload-form");
+    const docFileInput = document.getElementById("doc-file-input");
+    const selectedFileInfo = document.getElementById("selected-file-info");
+    const uploadBtn = document.getElementById("upload-btn");
+    const docSearchContainer = document.getElementById("doc-search-container");
+    const activeDocName = document.getElementById("active-doc-name");
+    const activeDocChunks = document.getElementById("active-doc-chunks");
+
+    const docSearchForm = document.getElementById("doc-search-form");
+    const docSearchInput = document.getElementById("doc-search-input");
+    const docSearchBtn = document.getElementById("doc-search-btn");
+    const docSearchMode = document.getElementById("doc-search-mode");
+    const docTopK = document.getElementById("doc-top-k");
+
+    let currentUploadSessionId = null;
+
+    docFileInput.addEventListener("change", () => {
+        if (docFileInput.files && docFileInput.files.length > 0) {
+            const file = docFileInput.files[0];
+            selectedFileInfo.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+            selectedFileInfo.hidden = false;
+            uploadBtn.disabled = false;
+        } else {
+            selectedFileInfo.hidden = true;
+            uploadBtn.disabled = true;
+        }
+    });
+
+    uploadForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!docFileInput.files || docFileInput.files.length === 0) return;
+
+        const file = docFileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
+
+        uploadBtn.disabled = true;
+        setLoading(true);
+        clearMessages();
+
+        try {
+            const response = await fetch("/api/upload", {
+                method: "POST",
+                body: formData,
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                const err = (data && data.error && data.error.message) || "Upload failed.";
+                showError(err);
+                return;
+            }
+
+            currentUploadSessionId = data.session_id;
+            activeDocName.textContent = data.filename;
+            activeDocChunks.textContent = `${data.total_chunks} chunks`;
+            docSearchContainer.hidden = false;
+
+            searchSummary.textContent = data.message;
+            searchSummary.hidden = false;
+            emptyState.innerHTML = `
+                <div class="empty-state-icon">🧠</div>
+                <h2>Document Ready for Semantic Search</h2>
+                <p>Type any question or concept into the search box above to retrieve relevant passages from "${escapeHtml(data.filename)}".</p>
+            `;
+            emptyState.hidden = false;
+            resultsList.hidden = true;
+        } catch (err) {
+            showError("Network error while uploading document.");
+        } finally {
+            uploadBtn.disabled = false;
+            setLoading(false);
+        }
+    });
+
+    // In-doc search form handling
+    docSearchForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        if (!currentUploadSessionId) {
+            showError("No document is currently active. Please upload a file first.");
+            return;
+        }
+
+        const query = docSearchInput.value.trim();
+        if (!query) return;
+
+        const topK = parseInt(docTopK.value, 10) || 5;
+        const mode = docSearchMode.value || "semantic";
+
+        docSearchBtn.disabled = true;
+        setLoading(true);
+        clearMessages();
+
+        try {
+            const response = await fetch("/api/search-doc", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    session_id: currentUploadSessionId,
+                    query: query,
+                    top_k: topK,
+                    mode: mode,
+                }),
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                const err = (data && data.error && data.error.message) || "Search within document failed.";
+                showError(err);
+                return;
+            }
+
+            renderResults(data);
+        } catch (err) {
+            showError("Network error searching inside document.");
+        } finally {
+            docSearchBtn.disabled = false;
+            setLoading(false);
+        }
+    });
     searchForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         const query = searchInput.value.trim();

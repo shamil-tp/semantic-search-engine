@@ -113,6 +113,59 @@ def load_file(file_path: str | Path) -> Tuple[Optional[RawDocument], Optional[st
     ), None
 
 
+def extract_text_from_file_bytes(
+    file_bytes: bytes,
+    filename: str,
+) -> str:
+    """
+    Extract raw text from uploaded file bytes.
+    Supports .txt, .md, .json, and .pdf files.
+    """
+    ext = Path(filename).suffix.lower()
+
+    if ext == ".pdf":
+        import io
+        try:
+            import pypdf
+            reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+            pages = []
+            for i, page in enumerate(reader.pages):
+                page_text = page.extract_text() or ""
+                if page_text.strip():
+                    pages.append(f"--- Page {i + 1} ---\n{page_text}")
+            return "\n\n".join(pages)
+        except Exception as exc:
+            logger.warning(f"pypdf extraction failed for {filename}: {exc}")
+            raise ValueError(f"Failed to parse PDF file {filename}: {exc}") from exc
+
+    elif ext == ".json":
+        import json
+        try:
+            parsed = json.loads(file_bytes.decode("utf-8", errors="replace"))
+            if isinstance(parsed, list):
+                chunks = []
+                for item in parsed:
+                    if isinstance(item, dict):
+                        parts = [str(item.get(k, "")) for k in ("title", "h1", "description", "content", "text") if item.get(k)]
+                        if parts:
+                            chunks.append("\n".join(parts))
+                        else:
+                            chunks.append(json.dumps(item))
+                    else:
+                        chunks.append(str(item))
+                return "\n\n".join(chunks)
+            elif isinstance(parsed, dict):
+                return json.dumps(parsed, indent=2)
+            return str(parsed)
+        except Exception as exc:
+            logger.warning(f"JSON parsing failed for {filename}: {exc}")
+            return file_bytes.decode("utf-8", errors="replace")
+
+    else:
+        # Default text/markdown decoding
+        return file_bytes.decode("utf-8", errors="replace")
+
+
 def load_crawler_json(
     file_path: str | Path,
     limit: Optional[int] = None,
