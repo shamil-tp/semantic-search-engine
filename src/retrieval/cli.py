@@ -325,7 +325,10 @@ def search_hybrid_command(args):
         print(f"\n[Rank {result.rank}] Score: {result.score:.4f} | Chunk ID: {result.chunk_id}")
         print(f"Document ID: {result.document_id} | Path: {result.source_path}")
         print(f"Text excerpt:\n{result.text}")
-    parser = argparse.ArgumentParser(description="Phase 2 Lexical Search CLI")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Semantic Search CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Build index subcommand

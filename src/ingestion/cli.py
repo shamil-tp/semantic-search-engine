@@ -26,8 +26,19 @@ def parse_args(args=None):
         "--input-dir",
         "-i",
         type=str,
-        required=True,
         help="Input directory containing raw documents (.txt, .md)",
+    )
+    parser.add_argument(
+        "--crawler-file",
+        "-f",
+        type=str,
+        help="Input crawler JSON / JSONL export file (e.g. data/crawler.sites.json)",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Optional maximum number of records to ingest from crawler file",
     )
     parser.add_argument(
         "--output-dir",
@@ -67,8 +78,12 @@ def main():
     args = parse_args()
     setup_logging(args.verbose)
 
+    if not args.input_dir and not args.crawler_file:
+        parser.error("Either --input-dir (-i) or --crawler-file (-f) must be specified.")
+
     logger = logging.getLogger("ingestion_cli")
-    logger.info(f"Starting ingestion from: {args.input_dir}")
+    source_desc = f"directory: {args.input_dir}" if args.input_dir else f"crawler file: {args.crawler_file}"
+    logger.info(f"Starting ingestion from {source_desc}")
     logger.info(f"Output target: {args.output_dir}")
     logger.info(f"Chunk size: {args.chunk_size}, Chunk overlap: {args.chunk_overlap}")
 
@@ -79,10 +94,17 @@ def main():
     )
 
     try:
-        result = pipeline.run(
-            input_dir=args.input_dir,
-            output_dir=args.output_dir,
-        )
+        if args.crawler_file:
+            result = pipeline.run_crawler_file(
+                crawler_file=args.crawler_file,
+                output_dir=args.output_dir,
+                limit=args.limit,
+            )
+        else:
+            result = pipeline.run(
+                input_dir=args.input_dir,
+                output_dir=args.output_dir,
+            )
         stats = result["statistics"]
         print("\n=== Ingestion Completed Successfully ===")
         print(json.dumps(stats, indent=2))

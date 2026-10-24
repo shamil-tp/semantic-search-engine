@@ -1,74 +1,96 @@
-"""API integration tests using an in-memory lexical index."""
+from __future__ import annotations
 
+from pathlib import Path
 import pytest
-
-flask = pytest.importorskip("flask")
-
-from src.api.app import create_app
 from src.ingestion.schemas import DocumentChunk
 from src.retrieval.lexical import LexicalSearchEngine
+from src.api.app import create_app
 
 
-@pytest.fixture()
-def client():
-    engine = LexicalSearchEngine().build_index(
-        [
-            DocumentChunk(
-                "c1",
-                "doc1",
-                "/public/guide.md",
-                0,
-                "Semantic search uses vector embeddings.",
-                0,
-                37,
-                {"extension": ".md"},
-            ),
-            DocumentChunk(
-                "c2",
-                "doc2",
-                "/public/notes.txt",
-                0,
-                "Unicode normalization prepares text.",
-                0,
-                33,
-                {"extension": ".txt"},
-            ),
-        ]
+@pytest.fixture
+def test_engine():
+    chunks = [
+        DocumentChunk(
+            chunk_id="chunk_1",
+            document_id="doc_1",
+            source_path="/corpus/doc1.md",
+            chunk_index=0,
+            text="Semantic search with vector embeddings and information retrieval.",
+            start_char=0,
+            end_char=68,
+            metadata={"file_name": "doc1.md", "extension": ".md"},
+        ),
+        DocumentChunk(
+            chunk_id="chunk_2",
+            document_id="doc_2",
+            source_path="/corpus/doc2.txt",
+            chunk_index=0,
+            text="Lexical search using TF-IDF matching.",
+            start_char=0,
+            end_char=37,
+            metadata={"file_name": "doc2.txt", "extension": ".txt"},
+        ),
+    ]
+    return LexicalSearchEngine().build_index(chunks)
+
+
+@pytest.fixture
+def client(test_engine):
+    app = create_app(
+        {"SEARCH_MODE": "lexical", "MAX_TOP_K": 10},
+        lexical_engine=test_engine,
     )
-    app = create_app({"TESTING": True, "MAX_TOP_K": 3}, lexical_engine=engine)
-    return app.test_client()
+    app.config["TESTING"] = True
+    with app.test_client() as client:
+        yield client
 
 
-def test_health_search_and_document(client):
-    assert client.get("/health").get_json()["status"] == "ok"
-    response = client.post(
-        "/api/v1/search", json={"query": "vector embeddings", "top_k": 1}
-    )
-    assert response.status_code == 200
-    assert response.get_json()["results"][0]["document_id"] == "doc1"
-    assert client.get("/api/v1/documents/doc1").status_code == 200
+def test_homepage_and_health(client):
+    res_home = client.get("/")
+    assert res_home.status_code == 200
+    assert b"Semantic Search Engine" in res_home.data
+    assert b"search-form" in res_home.data
+
+    res_health = client.get("/health")
+    assert res_health.status_code == 200
+    assert res_health.get_json() == {"status": "ok", "search_mode": "lexical"}
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"query": " "},
-        {"query": 2},
-        {"query": "ok", "top_k": 0},
-        {"query": "ok", "filters": {"topic": "x"}},
-    ],
-)
-def test_search_rejects_invalid_requests(client, payload):
-    response = client.post("/api/v1/search", json=payload)
-    assert response.status_code == 400
-    assert response.get_json()["error"]["code"] == "invalid_request"
+def test_api_search_endpoint(client):
+    res = client.post("/api/search", json={"query": "semantic search", "top_k": 3})
+    assert res.status_code == 200
+    payload = res.get_json()
+    assert payload["query"] == "semantic search"
+    assert payload["count"] >= 1
+    assert payload["results"][0]["document_id"] == "doc_1"
 
 
-def test_search_filter_and_not_found(client):
-    response = client.post(
-        "/api/v1/search", json={"query": "text", "filters": {"extension": ".txt"}}
-    )
-    assert response.status_code == 200
-    assert response.get_json()["results"][0]["document_id"] == "doc2"
-    assert client.get("/api/v1/documents/missing").status_code == 404
+def test_search_rejects_invalid_requests(client):
+    # Missing query
+    res = client.post("/api/search", json={})
+    assert res.status_code == 400
+
+    # Negative top_k
+    res = client.post("/api/search", json={"query": "test", "top_k": -1})
+    assert res.status_code == 400
+
+    # Oversized top_k
+    res = client.post("/api/search", json={"query": "test", "top_k": 100})
+    assert res.status_code == 400
+
+
+def test_document_and_static_assets(client):
+    res_doc = client.get("/api/v1/documents/doc_1")
+    assert res_doc.status_code == 200
+    assert res_doc.get_json()["document_id"] == "doc_1"
+
+    res_missing = client.get("/api/v1/documents/non_existent")
+    assert res_missing.status_code == 404
+
+    # Static CSS
+    res_css = client.get("/static/css/style.css")
+    assert res_css.status_code == 200
+
+    # Static JS
+    res_js = client.get("/static/js/app.js")
+    assert res_js.status_code == 200

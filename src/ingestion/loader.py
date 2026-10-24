@@ -111,3 +111,97 @@ def load_file(file_path: str | Path) -> Tuple[Optional[RawDocument], Optional[st
         raw_text=content,
         metadata=metadata,
     ), None
+
+
+def load_crawler_json(
+    file_path: str | Path,
+    limit: Optional[int] = None,
+) -> Iterator[RawDocument]:
+    """
+    Stream and convert crawled websites JSON/JSONL export into RawDocuments.
+    Handles both JSON arrays `[...]` and newline-delimited JSON lines.
+    Extracts title, h1, description, url, and main text content into raw_text.
+    """
+    path = Path(file_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Crawler file not found: {path}")
+
+    import json
+
+    with open(path, "r", encoding="utf-8") as f:
+        # Check if file starts with array '['
+        first_char = ""
+        while True:
+            ch = f.read(1)
+            if not ch:
+                break
+            if not ch.isspace():
+                first_char = ch
+                break
+        f.seek(0)
+
+        if first_char == "[":
+            data = json.load(f)
+            records = data[:limit] if limit else data
+            for idx, item in enumerate(records):
+                yield _record_to_raw_document(item, str(path), idx)
+        else:
+            count = 0
+            for idx, line in enumerate(f):
+                line_str = line.strip()
+                if not line_str:
+                    continue
+                item = json.loads(line_str)
+                yield _record_to_raw_document(item, str(path), idx)
+                count += 1
+                if limit and count >= limit:
+                    break
+
+
+def _record_to_raw_document(item: Dict[str, Any], file_path: str, idx: int) -> RawDocument:
+    """Helper to convert a single crawler JSON dictionary into RawDocument."""
+    # Extract ID
+    raw_id = item.get("_id")
+    if isinstance(raw_id, dict) and "$oid" in raw_id:
+        doc_id = raw_id["$oid"][:16]
+    elif raw_id:
+        doc_id = str(raw_id)[:16]
+    else:
+        doc_id = hashlib.sha256(f"{file_path}_{idx}".encode("utf-8")).hexdigest()[:16]
+
+    url = item.get("url", "")
+    title = item.get("title", "")
+    h1 = item.get("h1", "")
+    description = item.get("description", "")
+    content = item.get("content", "")
+
+    # Combine title, description, and content into rich textual representation
+    text_parts = []
+    if title:
+        text_parts.append(title)
+    if h1 and h1 != title:
+        text_parts.append(h1)
+    if description:
+        text_parts.append(description)
+    if content:
+        text_parts.append(content)
+
+    full_text = "\n\n".join(text_parts)
+
+    metadata: Dict[str, Any] = {
+        "file_name": Path(file_path).name,
+        "extension": ".json",
+        "url": url,
+        "title": title,
+        "favicon": item.get("favicon", ""),
+        "externalBacklinks": item.get("externalBacklinks", 0),
+        "internalBacklinks": item.get("internalBacklinks", 0),
+        "level": item.get("level", 0),
+    }
+
+    return RawDocument(
+        document_id=doc_id,
+        source_path=url if url else f"{file_path}#{idx}",
+        raw_text=full_text,
+        metadata=metadata,
+    )

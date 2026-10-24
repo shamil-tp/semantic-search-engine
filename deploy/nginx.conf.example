@@ -1,0 +1,36 @@
+# Nginx Reverse Proxy Configuration for Semantic Search Engine
+# Place in /etc/nginx/sites-available/semantic-search and link to /etc/nginx/sites-enabled/
+
+server {
+    listen 80;
+    server_name search.yourdomain.com; # Replace with your VPS domain or public IP
+
+    # Disallow server signature
+    server_tokens off;
+
+    # Client body limit matching backend configuration (16KB for search queries)
+    client_max_body_size 64k;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+
+        # Standard proxy headers
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 60s;
+        proxy_send_timeout 60s;
+    }
+
+    # Optional: Serve static assets directly through Nginx for optimal throughput
+    location /static/ {
+        alias /var/www/semantic-search-engine/src/api/static/;
+        expires 7d;
+        add_header Cache-Control "public, no-transform";
+    }
+}

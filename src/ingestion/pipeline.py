@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from src.ingestion.cleaner import TextCleaner
 from src.ingestion.chunker import chunk_document
-from src.ingestion.loader import discover_files, load_file
+from src.ingestion.loader import discover_files, load_crawler_json, load_file
 from src.ingestion.schemas import DocumentChunk, ProcessedDocument
 from src.ingestion.statistics import calculate_corpus_statistics
 
@@ -92,6 +92,65 @@ class IngestionPipeline:
             processed_documents=processed_docs,
             chunks=all_chunks,
             failure_reasons=failure_reasons,
+        )
+
+        if output_dir:
+            self._save_results(output_dir, processed_docs, all_chunks, stats)
+
+        return {
+            "processed_documents": processed_docs,
+            "chunks": all_chunks,
+            "statistics": stats,
+        }
+
+    def run_crawler_file(
+        self,
+        crawler_file: str | Path,
+        output_dir: Optional[str | Path] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """
+        Execute ingestion pipeline on a crawler JSON / JSONL export file.
+        """
+        path = Path(crawler_file)
+        logger.info(f"Ingesting crawler data from {path.resolve()} (limit={limit})")
+
+        processed_docs: List[ProcessedDocument] = []
+        all_chunks: List[DocumentChunk] = []
+
+        empty_count = 0
+        duplicate_count = 0
+        total_discovered = 0
+
+        for raw_doc in load_crawler_json(path, limit=limit):
+            total_discovered += 1
+            processed_doc, clean_status = self.cleaner.clean_document(raw_doc)
+
+            if clean_status == "empty":
+                empty_count += 1
+                continue
+            elif clean_status == "duplicate":
+                duplicate_count += 1
+                continue
+
+            assert processed_doc is not None
+            processed_docs.append(processed_doc)
+
+            doc_chunks = chunk_document(
+                processed_doc,
+                chunk_size=self.chunk_size,
+                chunk_overlap=self.chunk_overlap,
+            )
+            all_chunks.extend(doc_chunks)
+
+        stats = calculate_corpus_statistics(
+            discovered_count=total_discovered,
+            skipped_unsupported_count=0,
+            failed_count=0,
+            empty_count=empty_count,
+            duplicate_count=duplicate_count,
+            processed_documents=processed_docs,
+            chunks=all_chunks,
         )
 
         if output_dir:

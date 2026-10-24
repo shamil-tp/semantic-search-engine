@@ -1,102 +1,231 @@
 # Semantic Search Engine
 
-A small, reproducible Python search service for public text and Markdown documents. It ingests normalized chunks, builds a persisted TF-IDF index, and serves validated search requests. Dense, ANN, RRF, and cross-encoder components remain optional: they are used only after matching artifacts and evaluation evidence exist.
+A modular, reproducible semantic search engine in Python spanning from raw document ingestion and preprocessing to lexical (TF-IDF), dense vector embeddings (SentenceTransformers), and reciprocal rank fusion hybrid retrieval with a responsive Flask web interface, ready for Ubuntu VPS deployment.
 
-## Architecture
+---
+
+## 1. Architecture Overview
 
 ```text
-raw .txt/.md -> ingestion + deduplication -> chunks.jsonl
-                                         |-> lexical TF-IDF index -> Flask API
-                                         |-> optional dense index -> RRF (opt-in)
+├── src/
+│   ├── ingestion/       # Loader, cleaner, overlapping chunker, schema, profiling
+│   ├── query/           # Intent classifier (SVM), NER, spelling & controlled expansion
+│   ├── retrieval/
+│   │   ├── lexical.py   # TF-IDF sparse matrix cosine similarity
+│   │   ├── dense.py     # SentenceTransformers bi-encoder exact search
+│   │   ├── ann.py       # scikit-learn NearestNeighbors vector search & safe persistence
+│   │   ├── hybrid.py    # Reciprocal Rank Fusion (RRF) combining lexical + dense
+│   │   └── cli.py       # CLI commands for building, searching, evaluating
+│   ├── evaluation/      # Recall@k, MRR, nDCG@k benchmark evaluator
+│   └── api/
+│       ├── app.py       # Flask application factory, /health, /api/search, /
+│       ├── templates/   # Jinja2 HTML web interface (index.html)
+│       └── static/      # Vanilla CSS (style.css) and JavaScript (app.js)
+├── deploy/
+│   ├── semantic-search.service  # systemd service unit for Gunicorn
+│   └── nginx.conf.example       # Nginx reverse proxy configuration
+├── data/sample_corpus/          # Demonstration corpus (.txt, .md)
+├── pyproject.toml               # Python 3.12+ project configuration & dependencies
+└── tests/                       # 50 automated pytest test cases
 ```
 
-The included corpus is public sample material, so document metadata is available through the API. Do not expose `GET /api/v1/documents/<id>` for restricted corpora without adding real document-level authorization before retrieval/output.
+---
 
-## Clean setup
+## 2. Local Setup (Windows Development)
 
-Python 3.10+ is required. The checked-in [requirements.lock](requirements.lock) records the verified environment; `pyproject.toml` remains the project source of truth.
+### Prerequisites
+- Python 3.10+ (tested on Python 3.12 and 3.14)
+- Git
 
-```bash
+### Installation
+```powershell
+# Create and activate virtual environment
 python -m venv .venv
-.venv\Scripts\activate
-python -m pip install -e ".[dev,production]"
+.venv\Scripts\Activate.ps1
+
+# Install package in editable mode with development tools
+pip install -e ".[dev]"
 ```
 
-If using the exact verified versions instead:
-
-```bash
-python -m pip install -r requirements.lock
-python -m pip install -e .
+### Running Tests
+```powershell
+pytest -v
 ```
 
-`hnswlib` is optional in practice: it could not be installed under the verified Python 3.14 environment, so ANN tests are skipped there. Use a supported Python/runtime and `pip install -e .` to enable it.
-
-## Build and evaluate
-
-The repository includes a processed sample corpus. To rebuild everything from raw files:
-
-```bash
-python -m src.ingestion.cli --input-dir data/sample_corpus --output-dir data/processed --chunk-size 50 --chunk-overlap 10
-python -m src.retrieval.cli build --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/lexical_sample
-python -m src.evaluation.cli --lexical-index-dir artifacts/indices/lexical_sample --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/reports/pipeline_comparison.json
-```
-
-Dense retrieval is an explicit offline job; it never runs in an API request:
-
-```bash
-python -m src.retrieval.cli build-dense --chunks-file data/processed/chunks.jsonl --index-dir artifacts/indices/dense_index --model-name all-MiniLM-L6-v2
-python -m src.evaluation.cli --lexical-index-dir artifacts/indices/lexical_sample --dense-index-dir artifacts/indices/dense_index --eval-file data/evaluation/synthetic_queries.json --output-report artifacts/reports/pipeline_comparison.json
-```
-
-The second command evaluates lexical, dense, and RRF on exactly the supplied queries and records p50/p95 in-process latency. It does not split the current four-query dataset: it is too small to support valid tuning/test claims. Reranking stays disabled and no knowledge graph is added; see [ADR 003](docs/decisions/003_hybrid_retrieval_and_reranking.md) and [ADR 004](docs/decisions/004_graph_retrieval_assessment.md).
-
-## API
-
-Copy `.env.example` values into your deployment environment. Start development mode after building the lexical artifact:
-
-```bash
+### Running the Web Application
+```powershell
+# Launch local development server
 python -m src.api.app
+# Open in browser: http://127.0.0.1:8000
 ```
 
-Production on Linux uses Gunicorn (Windows may use Waitress):
+---
 
+## 3. Data Ingestion & Index Creation Workflow
+
+### Step 1: Ingest & Chunk Documents
+
+**From a folder of text/markdown files:**
+```powershell
+python -m src.ingestion.cli `
+  --input-dir data/sample_corpus `
+  --output-dir data/processed `
+  --chunk-size 500 `
+  --chunk-overlap 50
+```
+
+**Or directly from a web crawler export (`.json` or `.jsonl`):**
+```powershell
+python -m src.ingestion.cli `
+  --crawler-file data/crawler.sites.json `
+  --output-dir data/processed `
+  --limit 5000 # (optional limit)
+```
+
+### Step 2: Build Lexical TF-IDF Index
+```powershell
+python -m src.retrieval.cli build `
+  --chunks-file data/processed/chunks.jsonl `
+  --index-dir artifacts/indices/lexical_sample
+```
+
+### Step 3: Build Dense / Vector Index
+```powershell
+python -m src.retrieval.cli build-dense `
+  --chunks-file data/processed/chunks.jsonl `
+  --index-dir artifacts/indices/dense_sample
+```
+
+---
+
+## 4. Web Interface & API Endpoints
+
+### Web Interface
+Navigate to `http://127.0.0.1:8000` to access the search interface. Features:
+- Keyboard support (Enter to search, accessible labels)
+- Real-time loading indicators
+- Score ranking and metadata breakdown (file name, chunk index, document ID)
+- Optional extension filters (`.md`, `.txt`)
+
+### REST API
+
+#### 1. Health Check
+`GET /health`
+```json
+{
+  "search_mode": "lexical",
+  "status": "ok"
+}
+```
+
+#### 2. Search Endpoint
+`POST /api/search` (or `POST /api/v1/search`)
+```json
+{
+  "query": "vector embeddings in semantic search",
+  "top_k": 5,
+  "filters": {
+    "extension": ".md"
+  }
+}
+```
+**Response Schema**:
+```json
+{
+  "count": 2,
+  "latency_ms": 1.25,
+  "query": "vector embeddings in semantic search",
+  "top_k": 5,
+  "results": [
+    {
+      "rank": 1,
+      "chunk_id": "a3090451a0a256d7_c1",
+      "document_id": "a3090451a0a256d7",
+      "score": 0.3142,
+      "text": "using for search. ## Key Principles 1. Contextual Understanding...",
+      "source_path": ".../doc1_semantic_search.md",
+      "chunk_index": 1,
+      "metadata": {
+        "file_name": "doc1_semantic_search.md",
+        "extension": ".md"
+      }
+    }
+  ]
+}
+```
+
+---
+
+## 5. Production Deployment (Ubuntu VPS)
+
+### Prerequisites on Ubuntu VPS
 ```bash
-gunicorn --bind 0.0.0.0:8000 --workers 2 --threads 4 --timeout 30 "src.api.app:create_app()"
+sudo apt update && sudo apt install -y python3.12 python3.12-venv python3-pip nginx certbot python3-certbot-nginx
 ```
 
+### Step 1: Clone Repository & Create User
 ```bash
-curl http://127.0.0.1:8000/health
-curl -X POST http://127.0.0.1:8000/api/v1/search -H "Content-Type: application/json" -d '{"query":"vector embeddings","top_k":3,"filters":{"extension":".md"}}'
-curl http://127.0.0.1:8000/api/v1/documents/a3090451a0a256d7
+# Setup unprivileged service user
+sudo useradd -r -s /bin/false -d /var/www/semantic-search-engine www-data 2>/dev/null || true
+
+# Place code
+sudo git clone <YOUR_REPO_URL> /var/www/semantic-search-engine
+cd /var/www/semantic-search-engine
+
+# Setup Python 3.12 virtual environment & CPU torch
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -e ".[production]"
 ```
 
-Successful search responses contain `query`, `top_k`, `count`, `latency_ms`, and ranked results. Invalid input returns a consistent JSON error, for example `{"error":{"code":"invalid_request","message":"query must be a non-empty string."}}`. The API accepts only nonempty string queries, `top_k` from 1–20 (configurable), and an `extension` filter. Its request body is limited to 16 KiB by default. CORS is disabled unless a request Origin exactly matches `ALLOWED_ORIGINS`.
-
-## Tests and measured baseline
-
+### Step 2: Configure Environment & Generate Indexes
 ```bash
-pytest --basetemp .pytest-tmp -q
-ruff check src tests
+cp .env.example .env
+# Edit .env for production settings
+nano .env
+
+# Generate production indexes prior to launching the service
+python -m src.ingestion.cli -i data/sample_corpus -o data/processed
+python -m src.retrieval.cli build -c data/processed/chunks.jsonl -o artifacts/indices/lexical_sample
+python -m src.retrieval.cli build-dense -c data/processed/chunks.jsonl -o artifacts/indices/dense_sample
+
+# Create log directory and set permissions
+sudo mkdir -p /var/log/semantic-search
+sudo chown -R www-data:www-data /var/www/semantic-search-engine /var/log/semantic-search
 ```
 
-The committed lexical baseline (`artifacts/baselines/baseline_v1.json`) evaluated all four synthetic queries at MRR, Recall@1, and nDCG@1 of 1.0. The latest measured run is recorded in [the evaluation report](docs/evaluation_report.md). This is a tiny, synthetic, non-held-out set—not a production relevance claim.
-
-## Container deployment and operations
-
-`Dockerfile` deliberately copies only the prebuilt lexical artifact. Build and test it locally where Docker is available:
-
+### Step 3: Setup systemd Service
 ```bash
-docker build -t semantic-search .
-docker run --rm -p 8000:8000 semantic-search
+sudo cp deploy/semantic-search.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now semantic-search
+sudo systemctl status semantic-search
 ```
 
-`compose.yaml` supplies read-only filesystem and CPU/memory limits. The image has a health check at `/health`.
+### Step 4: Setup Nginx & HTTPS
+```bash
+sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/semantic-search
+# Replace server_name in /etc/nginx/sites-available/semantic-search with your actual domain
+sudo ln -s /etc/nginx/sites-available/semantic-search /etc/nginx/sites-enabled/
+sudo nginx -t
+sudo systemctl restart nginx
 
-To re-index, build into a new versioned artifact directory, run evaluation/API smoke tests against it, then atomically change `LEXICAL_INDEX_DIR` (and `DENSE_INDEX_DIR` only when they match) and restart the service. Roll back by restoring the prior environment value and restarting. Never overwrite an artifact being served.
+# Enable SSL/HTTPS with Let's Encrypt
+sudo certbot --nginx -d search.yourdomain.com
+```
 
-## Limitations and future work
+### Memory & Gunicorn Sizing
+In `deploy/semantic-search.service`, Gunicorn is configured with `--workers 2 --threads 4 --worker-class gthread`.
+> **VPS Memory Note**: Because dense embedding models (e.g., SentenceTransformers) load neural network weights and PyTorch runtime into RAM, each process worker requires ~300–500MB of resident memory. Using threads within 2 workers allows concurrent request handling without duplicating model weights across many processes.
 
-- The corpus/evaluation set is intentionally tiny and synthetic; obtain separate training, validation, and held-out test judgments before selecting RRF parameters or enabling a reranker.
-- No authentication or document-level ACL exists because the sample corpus is public.
-- Supported ingestion formats are `.txt` and `.md`.
-- ANN, graph retrieval, learned ranking, and reranking require measured benefit and are not defaults.
+---
+
+## 6. Persistence & Backup Guidance
+
+- Persisted indexes reside in `artifacts/indices/` (e.g. `lexical_sample/` and `dense_sample/`).
+- Embeddings are saved safely as binary NumPy arrays (`embeddings.npy`) accompanied by chunk catalogs (`chunks.jsonl`) and metadata manifests (`vector_metadata.json`), avoiding pickle vulnerabilities.
+- To backup the search database:
+  ```bash
+  tar -czvf semantic_search_backup_$(date +%F).tar.gz artifacts/indices/ data/processed/
+  ```

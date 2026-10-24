@@ -1,0 +1,29 @@
+[Unit]
+Description=Semantic Search Engine Gunicorn Application
+After=network.target
+
+[Service]
+Type=notify
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/semantic-search-engine
+Environment="PATH=/var/www/semantic-search-engine/.venv/bin"
+EnvironmentFile=/var/www/semantic-search-engine/.env
+ExecStart=/var/www/semantic-search-engine/.venv/bin/gunicorn \
+    --workers 2 \
+    --threads 4 \
+    --worker-class gthread \
+    --bind 127.0.0.1:8000 \
+    --timeout 60 \
+    --access-logfile /var/log/semantic-search/access.log \
+    --error-logfile /var/log/semantic-search/error.log \
+    "src.api.app:create_app()"
+ExecReload=/bin/kill -s HUP $MAINPID
+KillMode=mixed
+TimeoutStopSec=15
+Restart=on-failure
+RestartSec=5
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

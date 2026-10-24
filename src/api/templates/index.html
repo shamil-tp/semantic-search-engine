@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <header class="app-header">
+        <div class="container">
+            <h1 class="brand-title">🔍 {{ app_title }}</h1>
+            <p class="brand-subtitle">Fast, accurate semantic & lexical information retrieval</p>
+            <div class="header-badges">
+                <span class="badge">Mode: <strong>{{ search_mode }}</strong></span>
+                <span class="badge">Engine: <strong>scikit-learn + SentenceTransformers</strong></span>
+            </div>
+        </div>
+    </header>
+
+    <main class="container main-content">
+        <section class="search-section" aria-label="Search Controls">
+            <form id="search-form" class="search-form" role="search">
+                <div class="search-bar">
+                    <label for="search-input" class="visually-hidden">Search query</label>
+                    <input 
+                        type="text" 
+                        id="search-input" 
+                        name="query" 
+                        class="search-input" 
+                        placeholder="Type keywords, concepts, or technical terms..." 
+                        autocomplete="off" 
+                        required 
+                        autofocus
+                    >
+                    <button type="submit" id="search-button" class="btn btn-primary" aria-label="Submit search">
+                        <span class="btn-text">Search</span>
+                        <span class="spinner" aria-hidden="true"></span>
+                    </button>
+                </div>
+
+                <div class="search-options">
+                    <div class="option-group">
+                        <label for="top-k-select">Max results:</label>
+                        <select id="top-k-select" name="top_k" class="select-control">
+                            <option value="5" selected>5</option>
+                            <option value="10">10</option>
+                            <option value="15">15</option>
+                            <option value="20">20</option>
+                        </select>
+                    </div>
+
+                    <div class="option-group">
+                        <label for="extension-filter">Filter extension:</label>
+                        <select id="extension-filter" name="extension" class="select-control">
+                            <option value="" selected>All files</option>
+                            <option value=".md">Markdown (.md)</option>
+                            <option value=".txt">Text (.txt)</option>
+                        </select>
+                    </div>
+                </div>
+            </form>
+        </section>
+
+        <section id="status-region" class="status-region" aria-live="polite">
+            <div id="loading-state" class="loading-state" hidden>
+                <div class="loading-spinner"></div>
+                <p>Searching index...</p>
+            </div>
+            <div id="error-message" class="alert alert-error" hidden></div>
+            <div id="search-summary" class="search-summary" hidden></div>
+        </section>
+
+        <section id="results-section" class="results-section" aria-label="Search Results">
+            <div id="empty-state" class="empty-state">
+                <div class="empty-state-icon">📄</div>
+                <h2>Explore the Index</h2>
+                <p>Enter a natural language question, keyword query, or technical phrase above.</p>
+            </div>
+            <div id="results-list" class="results-list" hidden></div>
+        </section>
+    </main>
+
+    <footer class="app-footer">
+        <div class="container">
+            <p>Semantic Search Engine &bull; Python 3.12 VPS Architecture &bull; <a href="/health" target="_blank">Health Status</a></p>
+        </div>
+    </footer>
+
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
