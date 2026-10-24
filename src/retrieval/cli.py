@@ -14,6 +14,7 @@ from src.query.ner import EntityRecognizer
 from src.query.pipeline import QueryPipeline
 from src.retrieval.dense import DenseSearchEngine
 from src.retrieval.ann import HnswSearchEngine
+from src.retrieval.hybrid import CrossEncoderReranker, HybridSearchEngine
 from src.retrieval.lexical import LexicalSearchEngine
 
 logging.basicConfig(
@@ -293,6 +294,37 @@ def search_ann_command(args):
         print(f"\n[Rank {result.rank}] Score: {result.score:.4f} | Chunk ID: {result.chunk_id}")
         print(f"Document ID: {result.document_id} | Path: {result.source_path}")
         print(f"Text excerpt:\n{result.text}")
+
+
+def search_hybrid_command(args):
+    """Fuse lexical and dense candidates, optionally reranking the bounded top-N."""
+    lexical = LexicalSearchEngine.load(args.lexical_index_dir)
+    dense = DenseSearchEngine.load(args.dense_index_dir, device=args.device)
+    reranker = None
+    if args.rerank_model:
+        reranker = CrossEncoderReranker(model_name=args.rerank_model, device=args.device)
+    engine = HybridSearchEngine(
+        lexical_engine=lexical,
+        dense_engine=dense,
+        rrf_k=args.rrf_k,
+        reranker=reranker,
+        rerank_top_n=args.rerank_top_n,
+    )
+    results = engine.search(
+        args.query,
+        top_k=args.top_k,
+        candidate_k=args.candidate_k,
+        max_excerpt_len=args.excerpt_len,
+    )
+    mode = "RRF + cross-encoder" if reranker else "RRF"
+    print(f"\n[Hybrid Search Results: {mode}] Query: '{args.query}' (top {args.top_k}):")
+    if not results:
+        print("No matching results found.")
+        return
+    for result in results:
+        print(f"\n[Rank {result.rank}] Score: {result.score:.4f} | Chunk ID: {result.chunk_id}")
+        print(f"Document ID: {result.document_id} | Path: {result.source_path}")
+        print(f"Text excerpt:\n{result.text}")
     parser = argparse.ArgumentParser(description="Phase 2 Lexical Search CLI")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -385,6 +417,19 @@ def search_ann_command(args):
     search_ann_parser.add_argument("--excerpt-len", type=int, default=200, help="Maximum text excerpt length")
     search_ann_parser.add_argument("--device", default="cpu", help="Device to encode queries on")
     search_ann_parser.set_defaults(func=search_ann_command)
+
+    search_hybrid_parser = subparsers.add_parser("search-hybrid", help="Fuse lexical and dense retrieval with optional reranking")
+    search_hybrid_parser.add_argument("--lexical-index-dir", required=True, help="Path to lexical TF-IDF index")
+    search_hybrid_parser.add_argument("--dense-index-dir", required=True, help="Path to exact dense index")
+    search_hybrid_parser.add_argument("--query", "-q", required=True, help="Search query string")
+    search_hybrid_parser.add_argument("--top-k", "-k", type=int, default=5, help="Number of final results")
+    search_hybrid_parser.add_argument("--candidate-k", type=int, default=50, help="Candidates retrieved per engine")
+    search_hybrid_parser.add_argument("--rrf-k", type=int, default=60, help="Reciprocal-rank fusion constant")
+    search_hybrid_parser.add_argument("--rerank-model", help="Cross-encoder model; omit to use RRF only")
+    search_hybrid_parser.add_argument("--rerank-top-n", type=int, default=20, help="Maximum fused candidates passed to reranker")
+    search_hybrid_parser.add_argument("--excerpt-len", type=int, default=200, help="Maximum text excerpt length")
+    search_hybrid_parser.add_argument("--device", default="cpu", help="Device for dense and reranker models")
+    search_hybrid_parser.set_defaults(func=search_hybrid_command)
 
     args = parser.parse_args()
     args.func(args)

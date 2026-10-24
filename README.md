@@ -108,7 +108,18 @@ python -m src.retrieval.cli build-ann --dense-index-dir artifacts/indices/dense_
 python -m src.retrieval.cli search-ann --index-dir artifacts/indices/hnsw_index --query "vector embeddings in semantic search" --top-k 5
 ```
 
-The HNSW artifact includes `hnsw_index.bin`, `chunks.jsonl`, and `ann_metadata.json`. If any artifact is absent, incompatible, or corrupt, rebuild it from the matching dense index rather than attempting partial recovery. Before selecting ANN in production, measure Recall@k against exact dense retrieval and record latency, memory, build time, and update cost. Tune `--ef-search` only from those measurements.
+The HNSW artifact includes `hnsw_index.bin`, `chunks.jsonl`, and `ann_metadata.json`. Its manifest records the format, HNSW library/version, cosine metric, model, dimension, corpus and catalog fingerprints, and HNSW settings. If any artifact is absent, incompatible, or corrupt, rebuild it from the matching dense index rather than attempting partial recovery. Before selecting ANN in production, measure Recall@k against exact dense retrieval and record latency, memory, build time, and update cost. Tune `--ef-search` only from those measurements.
+
+## Phase 6 — Hybrid Retrieval and Reranking
+
+Phase 6 provides explicit reciprocal-rank fusion (RRF) across lexical and dense candidates. Their scores are not directly mixed: RRF combines their ranks, which keeps the two retrieval signals comparable. A cross-encoder reranker is optional and only sees the configured leading fused candidates.
+
+```bash
+python -m src.retrieval.cli search-hybrid --lexical-index-dir artifacts/indices/lexical_index --dense-index-dir artifacts/indices/dense_index --query "vector embeddings in semantic search" --top-k 5
+python -m src.retrieval.cli search-hybrid --lexical-index-dir artifacts/indices/lexical_index --dense-index-dir artifacts/indices/dense_index --query "vector embeddings in semantic search" --rerank-model cross-encoder/ms-marco-MiniLM-L-6-v2 --rerank-top-n 20
+```
+
+Reranking is disabled unless `--rerank-model` is supplied. Before enabling either hybrid mode by default, compare lexical, dense, RRF, and RRF-plus-reranker runs on the same held-out evaluation set and record quality and latency.
 
 ## Phase 3 — Classical Text ML and Query Understanding
 

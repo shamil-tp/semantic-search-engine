@@ -8,6 +8,7 @@ re-encoding documents, so an ANN artifact is tied to a specific dense index.
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ ANN_INDEX_FILE = "hnsw_index.bin"
 ANN_CATALOG_FILE = "chunks.jsonl"
 ANN_METADATA_FILE = "ann_metadata.json"
 ANN_FORMAT_VERSION = 1
+ANN_METRIC = "cosine"
 
 
 def _require_hnswlib():
@@ -100,7 +102,7 @@ class HnswSearchEngine:
         hnswlib = _require_hnswlib()
         self.chunks = list(chunks)
         self.embedding_dim = int(vectors.shape[1])
-        index = hnswlib.Index(space="cosine", dim=self.embedding_dim)
+        index = hnswlib.Index(space=ANN_METRIC, dim=self.embedding_dim)
         index.init_index(
             max_elements=len(self.chunks),
             ef_construction=self.ef_construction,
@@ -166,6 +168,8 @@ class HnswSearchEngine:
         metadata = {
             "format_version": ANN_FORMAT_VERSION,
             "index_type": "hnsw_cosine",
+            "similarity_metric": ANN_METRIC,
+            "library": {"name": "hnswlib", "version": importlib.metadata.version("hnswlib")},
             "model_name": self.model_name,
             "embedding_dim": self.embedding_dim,
             "chunk_count": len(self.chunks),
@@ -189,7 +193,12 @@ class HnswSearchEngine:
                 raise FileNotFoundError(f"Missing required ANN index artifact: {artifact.name}; rebuild the index.")
         try:
             metadata = json.loads((path / ANN_METADATA_FILE).read_text(encoding="utf-8"))
-            if metadata.get("format_version") != ANN_FORMAT_VERSION or metadata.get("index_type") != "hnsw_cosine":
+            if (
+                metadata.get("format_version") != ANN_FORMAT_VERSION
+                or metadata.get("index_type") != "hnsw_cosine"
+                or metadata.get("similarity_metric") != ANN_METRIC
+                or metadata.get("library", {}).get("name") != "hnswlib"
+            ):
                 raise ValueError("Unsupported ANN index metadata; rebuild the index.")
             chunks = [DocumentChunk(**json.loads(line)) for line in (path / ANN_CATALOG_FILE).read_text(encoding="utf-8").splitlines() if line]
             if len(chunks) != metadata.get("chunk_count") or not chunks:
@@ -202,7 +211,7 @@ class HnswSearchEngine:
                 m=int(config["m"]), ef_construction=int(config["ef_construction"]), ef_search=int(config["ef_search"]),
             )
             hnswlib = _require_hnswlib()
-            index = hnswlib.Index(space="cosine", dim=int(metadata["embedding_dim"]))
+            index = hnswlib.Index(space=ANN_METRIC, dim=int(metadata["embedding_dim"]))
             index.load_index(str(path / ANN_INDEX_FILE), max_elements=len(chunks))
             if index.get_current_count() != len(chunks):
                 raise ValueError("ANN item count does not match chunk catalog; rebuild the index.")
